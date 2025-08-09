@@ -1,0 +1,127 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "containerGroupName": {
+            "type": "string",
+            "defaultValue": "mcp-bigquery-server",
+            "metadata": {
+                "description": "Name for the container group"
+            }
+        },
+        "containerName": {
+            "type": "string", 
+            "defaultValue": "mcp-bigquery",
+            "metadata": {
+                "description": "Name for the container"
+            }
+        },
+        "containerImage": {
+            "type": "string",
+            "metadata": {
+                "description": "Container image (e.g., your-registry.azurecr.io/mcp-bigquery:latest)"
+            }
+        },
+        "googleCloudProject": {
+            "type": "string",
+            "metadata": {
+                "description": "Google Cloud Project ID"
+            }
+        },
+        "googleCredentialsJson": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Google Cloud Service Account credentials JSON (base64 encoded)"
+            }
+        },
+        "cpuCores": {
+            "type": "string",
+            "defaultValue": "1.0",
+            "metadata": {
+                "description": "CPU cores for the container"
+            }
+        },
+        "memoryInGb": {
+            "type": "string", 
+            "defaultValue": "1.5",
+            "metadata": {
+                "description": "Memory in GB for the container"
+            }
+        },
+        "dnsNameLabel": {
+            "type": "string",
+            "metadata": {
+                "description": "DNS name label for the public IP (must be globally unique)"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources"
+            }
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.ContainerInstance/containerGroups",
+            "apiVersion": "2023-05-01",
+            "name": "[parameters('containerGroupName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "containers": [
+                    {
+                        "name": "[parameters('containerName')]",
+                        "properties": {
+                            "image": "[parameters('containerImage')]",
+                            "ports": [
+                                {
+                                    "protocol": "TCP",
+                                    "port": 8000
+                                }
+                            ],
+                            "environmentVariables": [
+                                {
+                                    "name": "GOOGLE_CLOUD_PROJECT",
+                                    "value": "[parameters('googleCloudProject')]"
+                                },
+                                {
+                                    "name": "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+                                    "secureValue": "[parameters('googleCredentialsJson')]"
+                                }
+                            ],
+                            "resources": {
+                                "requests": {
+                                    "memoryInGB": "[parameters('memoryInGb')]",
+                                    "cpu": "[parameters('cpuCores')]"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "restartPolicy": "Always",
+                "osType": "Linux",
+                "ipAddress": {
+                    "type": "Public",
+                    "ports": [
+                        {
+                            "protocol": "TCP",
+                            "port": 8000
+                        }
+                    ],
+                    "dnsNameLabel": "[parameters('dnsNameLabel')]"
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "containerIPv4Address": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
+        },
+        "containerFQDN": {
+            "type": "string", 
+            "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn]"
+        }
+    }
+}

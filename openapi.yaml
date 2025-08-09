@@ -1,0 +1,464 @@
+openapi: 3.1.3
+info:
+  title: MCP BigQuery Server API
+  description: |
+    HTTP transport for MCP (Model Context Protocol) BigQuery server with streaming support.
+    
+    This API provides access to Google BigQuery through the Model Context Protocol,
+    allowing you to execute SQL queries, browse datasets, and read table schemas.
+  version: 1.0.0
+  contact:
+    name: MCP BigQuery Server
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://your-domain.com
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Check the health and status of the MCP BigQuery server
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /mcp:
+    post:
+      summary: Execute MCP JSON-RPC request
+      description: |
+        Execute Model Context Protocol commands via JSON-RPC over HTTP.
+        
+        Supported MCP methods:
+        - `initialize` - Initialize MCP session
+        - `resources/list` - List available BigQuery datasets and tables
+        - `resources/read` - Read table schema information
+        - `tools/list` - List available tools (query tool)
+        - `tools/call` - Execute SQL queries against BigQuery
+      operationId: executeMcpRequest
+      tags:
+        - MCP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPRequest'
+            examples:
+              initialize:
+                summary: Initialize MCP session
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: "initialize"
+                  params:
+                    protocolVersion: "2024-11-05"
+                    capabilities: {}
+                    clientInfo:
+                      name: "my-app"
+                      version: "1.0.0"
+              
+              list_tools:
+                summary: List available tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: "tools/list"
+                  params: {}
+              
+              execute_query:
+                summary: Execute SQL query
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/call"
+                  params:
+                    name: "query"
+                    arguments:
+                      sql: "SELECT COUNT(*) as total FROM `bigquery-public-data.usa_names.usa_1910_current`"
+                      maximumBytesBilled: "1000000000"
+              
+              list_resources:
+                summary: List BigQuery resources
+                value:
+                  jsonrpc: "2.0"
+                  id: 4
+                  method: "resources/list"
+                  params: {}
+              
+              read_resource:
+                summary: Read table schema
+                value:
+                  jsonrpc: "2.0"
+                  id: 5
+                  method: "resources/read"
+                  params:
+                    uri: "bigquery://project-id/dataset/table/schema"
+
+      responses:
+        '200':
+          description: MCP request processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPResponse'
+              examples:
+                initialize_success:
+                  summary: Initialize response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 1
+                    result:
+                      protocolVersion: "2024-11-05"
+                      capabilities:
+                        resources:
+                          subscribe: false
+                          listChanged: false
+                        tools: {}
+                        prompts: {}
+                      serverInfo:
+                        name: "mcp-server/bigquery"
+                        version: "0.1.0"
+                
+                query_success:
+                  summary: Query execution response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 3
+                    result:
+                      content:
+                        - type: "text"
+                          text: '[{"total": 5647426}]'
+                
+                tools_list:
+                  summary: Tools list response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 2
+                    result:
+                      tools:
+                        - name: "query"
+                          description: "Run a read-only BigQuery SQL query"
+                          inputSchema:
+                            type: "object"
+                            properties:
+                              sql:
+                                type: "string"
+                              maximumBytesBilled:
+                                type: "string"
+                                description: "Maximum bytes billed (default: 1GB)"
+                            required: ["sql"]
+
+        '400':
+          description: Invalid request format or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPError'
+        
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPError'
+
+  /mcp/batch:
+    post:
+      summary: Execute batch MCP requests
+      description: Execute multiple MCP JSON-RPC requests in a single HTTP request
+      operationId: executeMcpBatch
+      tags:
+        - MCP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPBatchRequest'
+            example:
+              requests:
+                - jsonrpc: "2.0"
+                  id: 1
+                  method: "tools/list"
+                  params: {}
+                - jsonrpc: "2.0"
+                  id: 2
+                  method: "resources/list"
+                  params: {}
+      
+      responses:
+        '200':
+          description: Batch requests processed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MCPResponse'
+        
+        '500':
+          description: Batch processing error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/stream:
+    get:
+      summary: Server-Sent Events stream
+      description: |
+        Establish a Server-Sent Events connection for streaming MCP responses.
+        Useful for long-running queries or real-time updates.
+      operationId: mcpStream
+      tags:
+        - Streaming
+      responses:
+        '200':
+          description: SSE stream established
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: connected
+                  data: {"message": "Stream connected"}
+
+  /mcp/ws:
+    get:
+      summary: WebSocket connection
+      description: |
+        Establish a WebSocket connection for real-time bidirectional MCP communication.
+        Send and receive MCP JSON-RPC messages over the WebSocket connection.
+      operationId: mcpWebSocket
+      tags:
+        - WebSocket
+      responses:
+        '101':
+          description: WebSocket connection established
+        '400':
+          description: WebSocket upgrade failed
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        server:
+          type: string
+          example: "mcp-bigquery"
+        version:
+          type: string
+          example: "1.0.0"
+      required:
+        - status
+        - server
+        - version
+
+    MCPRequest:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+          description: JSON-RPC version (must be "2.0")
+        id:
+          oneOf:
+            - type: string
+            - type: number
+            - type: "null"
+          description: Request identifier
+        method:
+          type: string
+          description: MCP method name
+          enum:
+            - "initialize"
+            - "resources/list"
+            - "resources/read"
+            - "tools/list"
+            - "tools/call"
+        params:
+          type: object
+          description: Method-specific parameters
+          additionalProperties: true
+      required:
+        - jsonrpc
+        - method
+      example:
+        jsonrpc: "2.0"
+        id: 1
+        method: "tools/call"
+        params:
+          name: "query"
+          arguments:
+            sql: "SELECT 1"
+
+    MCPResponse:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          oneOf:
+            - type: string
+            - type: number
+            - type: "null"
+        result:
+          type: object
+          description: Success result
+          additionalProperties: true
+        error:
+          $ref: '#/components/schemas/MCPErrorObject'
+      required:
+        - jsonrpc
+      example:
+        jsonrpc: "2.0"
+        id: 1
+        result:
+          content:
+            - type: "text"
+              text: "Query results here"
+
+    MCPErrorObject:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: Error code
+          example: -32603
+        message:
+          type: string
+          description: Error message
+          example: "Internal error"
+        data:
+          type: string
+          description: Additional error data
+          example: "Detailed error information"
+      required:
+        - code
+        - message
+
+    MCPError:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          oneOf:
+            - type: string
+            - type: number
+            - type: "null"
+        error:
+          $ref: '#/components/schemas/MCPErrorObject'
+      required:
+        - jsonrpc
+        - error
+
+    MCPBatchRequest:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/MCPRequest'
+          minItems: 1
+      required:
+        - requests
+      example:
+        requests:
+          - jsonrpc: "2.0"
+            id: 1
+            method: "tools/list"
+            params: {}
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Error details
+      example:
+        detail: "Internal server error"
+
+    # MCP-specific schemas for different methods
+    InitializeParams:
+      type: object
+      properties:
+        protocolVersion:
+          type: string
+          example: "2024-11-05"
+        capabilities:
+          type: object
+          additionalProperties: true
+        clientInfo:
+          type: object
+          properties:
+            name:
+              type: string
+            version:
+              type: string
+          required:
+            - name
+            - version
+      required:
+        - protocolVersion
+        - clientInfo
+
+    ResourcesReadParams:
+      type: object
+      properties:
+        uri:
+          type: string
+          format: uri
+          description: BigQuery resource URI
+          example: "bigquery://project-id/dataset/table/schema"
+      required:
+        - uri
+
+    ToolsCallParams:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: ["query"]
+        arguments:
+          type: object
+          properties:
+            sql:
+              type: string
+              description: SQL query to execute
+              example: "SELECT COUNT(*) FROM `project.dataset.table`"
+            maximumBytesBilled:
+              type: string
+              description: Maximum bytes billed (default: 1GB)
+              example: "1000000000"
+          required:
+            - sql
+      required:
+        - name
+        - arguments
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: MCP
+    description: Model Context Protocol endpoints
+  - name: Streaming
+    description: Server-Sent Events streaming
+  - name: WebSocket
+    description: WebSocket real-time communication
