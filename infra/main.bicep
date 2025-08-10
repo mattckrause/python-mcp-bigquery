@@ -22,7 +22,7 @@ param principalId string = ''
 // Tags that should be applied to all resources.
 var tags = {
   'azd-env-name': environmentName
-  'application': 'mcp-bigquery-server'
+  application: 'python-mcp-bq-server'
 }
 
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
