@@ -1,32 +1,40 @@
-# --- Python ---
-__pycache__/
-*.py[cod]
-*$py.class
-.python-version
+# --- Secrets & env ---
 .env
+.env.local
+.python-version
 .venv/
 venv/
-Pipfile.lock
-poetry.lock
-.build/
-.coverage
-.tox/
-pytest_cache/
-.cache/
-.eggs/
-dist/
-build/
 
 # --- Node/TypeScript ---
 node_modules/
 .npm/
 .pnpm-store/
-pnpm-lock.yaml
-package-lock.json
-yarn.lock
 .next/
-.coverage/
 dist/
+build/
+out/
+lib/
+.turbo/
+.nyc_output/
+coverage/
+
+# Do NOT ignore lockfiles by default (deterministic installs)
+# If you intentionally don't commit lockfiles, uncomment one:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# --- Python (if present) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.tox/
+pytest_cache/
+.cache/
+.eggs/
+.ruff_cache/
+.mypy_cache/
+.coverage
 
 # --- VS Code / IDE ---
 .vscode/
@@ -36,8 +44,12 @@ dist/
 .DS_Store
 Thumbs.db
 
-# --- OS / Temp ---
+# --- Logs / Temp ---
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 *.tmp
 *.temp
 ~$*
@@ -65,8 +77,6 @@ Thumbs.db
 
 # --- Generated Artifacts ---
 openapi.json
-openapi.yaml
-coverage/
 
 # --- Local data ---
 .scripts-local/
