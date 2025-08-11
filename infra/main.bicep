@@ -51,7 +51,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enabledForTemplateDeployment: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    accessPolicies: [
+    accessPolicies: principalId != '' ? [
       {
         tenantId: tenant().tenantId
         objectId: principalId
@@ -64,7 +64,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
           ]
         }
       }
-    ]
+    ] : []
   }
 }
 
@@ -162,12 +162,12 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           image: 'nginx:latest' // Placeholder - will be updated by azd deploy
           env: [
             {
-              name: 'GOOGLE_CLOUD_PROJECT_ID'
+              name: 'GOOGLE_CLOUD_PROJECT'
               value: googleCloudProject
             }
             {
-              name: 'GOOGLE_SERVICE_ACCOUNT_CREDENTIALS'
-              secretRef: googleApplicationCredentialsJson
+              name: 'GOOGLE_APPLICATION_CREDENTIALS_JSON'
+              secretRef: 'google-credentials'
             }
             {
               name: 'ENABLE_AUTH'
@@ -182,34 +182,35 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: jwtSecret
             }
           ]
-          probes: [
-            {
-              type: 'Liveness'
-              httpGet: {
-                path: '/health'
-                port: 8000
-                scheme: 'HTTP'
-              }
-              initialDelaySeconds: 30
-              periodSeconds: 30
-              timeoutSeconds: 10
-              successThreshold: 1
-              failureThreshold: 3
-            }
-            {
-              type: 'Readiness'
-              httpGet: {
-                path: '/health'
-                port: 8000
-                scheme: 'HTTP'
-              }
-              initialDelaySeconds: 10
-              periodSeconds: 10
-              timeoutSeconds: 10
-              successThreshold: 1
-              failureThreshold: 3
-            }
-          ]
+          // Temporarily remove health checks to debug startup issues
+          // probes: [
+          //   {
+          //     type: 'Liveness'
+          //     httpGet: {
+          //       path: '/health'
+          //       port: 8000
+          //       scheme: 'HTTP'
+          //     }
+          //     initialDelaySeconds: 30
+          //     periodSeconds: 30
+          //     timeoutSeconds: 10
+          //     successThreshold: 1
+          //     failureThreshold: 3
+          //   }
+          //   {
+          //     type: 'Readiness'
+          //     httpGet: {
+          //       path: '/health'
+          //       port: 8000
+          //       scheme: 'HTTP'
+          //     }
+          //     initialDelaySeconds: 10
+          //     periodSeconds: 10
+          //     timeoutSeconds: 10
+          //     successThreshold: 1
+          //     failureThreshold: 3
+          //   }
+          // ]
         }
       ]
       scale: {

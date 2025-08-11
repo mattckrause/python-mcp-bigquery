@@ -82,3 +82,5 @@ openapi.json
 .scripts-local/
 .tmp/
 .azure
+azure.yaml
+
