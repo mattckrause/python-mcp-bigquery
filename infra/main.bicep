@@ -182,35 +182,34 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: jwtSecret
             }
           ]
-          // Temporarily remove health checks to debug startup issues
-          // probes: [
-          //   {
-          //     type: 'Liveness'
-          //     httpGet: {
-          //       path: '/health'
-          //       port: 8000
-          //       scheme: 'HTTP'
-          //     }
-          //     initialDelaySeconds: 30
-          //     periodSeconds: 30
-          //     timeoutSeconds: 10
-          //     successThreshold: 1
-          //     failureThreshold: 3
-          //   }
-          //   {
-          //     type: 'Readiness'
-          //     httpGet: {
-          //       path: '/health'
-          //       port: 8000
-          //       scheme: 'HTTP'
-          //     }
-          //     initialDelaySeconds: 10
-          //     periodSeconds: 10
-          //     timeoutSeconds: 10
-          //     successThreshold: 1
-          //     failureThreshold: 3
-          //   }
-          // ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/health'
+                port: 8000
+                scheme: 'HTTP'
+              }
+              initialDelaySeconds: 60
+              periodSeconds: 60
+              timeoutSeconds: 30
+              successThreshold: 1
+              failureThreshold: 5
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/health'
+                port: 8000
+                scheme: 'HTTP'
+              }
+              initialDelaySeconds: 30
+              periodSeconds: 30
+              timeoutSeconds: 30
+              successThreshold: 1
+              failureThreshold: 10
+            }
+          ]
         }
       ]
       scale: {

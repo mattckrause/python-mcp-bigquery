@@ -74,6 +74,7 @@ pnpm-debug.log*
 **/key.json
 **/credentials.json
 *.secrets*
+key-file.json
 
 # --- Generated Artifacts ---
 openapi.json
@@ -83,4 +84,3 @@ openapi.json
 .tmp/
 .azure
 azure.yaml
-

@@ -8,6 +8,7 @@ Supports both stdio and HTTP transport modes.
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -153,7 +154,23 @@ Examples:
     if not project_id:
         parser.error("Missing required argument: --project-id or GOOGLE_CLOUD_PROJECT environment variable")
     
+    # Try to get credentials from environment
     credentials_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    
+    # If credentials_json looks like base64, decode it
+    if credentials_json:
+        try:
+            # Check if it's base64 by trying to decode it
+            decoded = base64.b64decode(credentials_json)
+            # Try to parse as JSON to verify it's valid
+            json.loads(decoded)
+            # If successful, use the decoded version
+            credentials_json = decoded.decode('utf-8')
+            logger.info("Decoded base64-encoded credentials from environment")
+        except (base64.binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
+            # Not base64 or not valid JSON after decoding, assume it's raw JSON
+            logger.info("Using raw JSON credentials from environment")
+            pass
     
     config = ServerConfig(
         project_id=project_id,
