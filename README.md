@@ -131,23 +131,17 @@ JWT_SECRET=your-jwt-secret-here
 
 ```powershell
 # Run as MCP stdio server
-python -m mcp_bigquery_server.main
-
-# Or use the installed command
-mcp-bigquery
+python src/mcp_bigquery_server/main.py --project-id <bigqurey projectID> --key-file <path to service account keyfile>
 ```
 
 ### Local HTTP Server
 
 ```powershell
-# Install HTTP dependencies
-pip install -e ".[http]"
-
 # Run HTTP server
-python -m mcp_bigquery_server.http_server
+python src/mcp_bigquery_server/main.py --project-id <bigqurey projectID> --key-file <path to service account keyfile> --http --port <port>
 
-# Server runs on http://localhost:8000
-# API docs at http://localhost:8000/docs
+# Server runs on http://localhost:<port>
+# API docs at http://localhost:<port>/docs
 ```
 
 ### Docker (Local)
@@ -213,7 +207,7 @@ https://your-app.kindriverbank-12345678.centralus.azurecontainerapps.io
 - `GET /mcp/stream` - Server-Sent Events stream
 - `GET /mcp/ws` - WebSocket connection
 - `GET /docs` - Interactive API documentation
-- `GET /openapi.json` - OpenAPI specification
+- `GET /openapi.yaml` - OpenAPI specification
 
 ## 🔧 Configuration Options
 
@@ -439,5 +433,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Documentation**: See `/docs` endpoint when running the server
 
 ---
-
-**Built with ❤️ for the Model Context Protocol community**

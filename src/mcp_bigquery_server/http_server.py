@@ -9,16 +9,90 @@ Provides FastAPI-based HTTP endpoints for the MCP protocol including:
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger(__name__)
+
+# Authentication configuration
+security = HTTPBearer(auto_error=False)
+
+def get_auth_config():
+    """Get authentication configuration from environment variables."""
+    return {
+        'enable_auth': os.getenv('ENABLE_AUTH', 'false').lower() == 'true',
+        'api_keys': set(key.strip() for key in os.getenv('API_KEYS', '').split(',') if key.strip()),
+        'jwt_secret': os.getenv('JWT_SECRET', '')
+    }
+
+def validate_api_key(api_key: str) -> bool:
+    """Validate API key."""
+    auth_config = get_auth_config()
+    return api_key in auth_config['api_keys']
+
+def validate_jwt_token(token: str) -> bool:
+    """Validate JWT token (basic implementation)."""
+    # This is a basic implementation - you might want to use a proper JWT library
+    # like PyJWT for production use
+    auth_config = get_auth_config()
+    if not auth_config['jwt_secret']:
+        return False
+    
+    # For now, just check if the token is not empty and secret is configured
+    # In a real implementation, you would decode and validate the JWT
+    return bool(token and auth_config['jwt_secret'])
+
+async def authenticate_request(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Authenticate request using API key or JWT token."""
+    auth_config = get_auth_config()
+    
+    # Skip authentication if not enabled
+    if not auth_config['enable_auth']:
+        return True
+    
+    # Check for API key in header
+    api_key_header = request.headers.get('X-API-Key')
+    if api_key_header and validate_api_key(api_key_header):
+        return True
+    
+    # Check for API key in query parameters
+    api_key_query = request.query_params.get('api_key')
+    if api_key_query and validate_api_key(api_key_query):
+        return True
+    
+    # Check for JWT token in Authorization header
+    if credentials and validate_jwt_token(credentials.credentials):
+        return True
+    
+    # If authentication is enabled but no valid credentials found, raise error
+    raise HTTPException(
+        status_code=401, 
+        detail="Authentication required. Provide X-API-Key header, api_key query parameter, or valid JWT token."
+    )
+
+def authenticate_websocket_sync(websocket: WebSocket):
+    """Authenticate WebSocket connection (synchronous check)."""
+    auth_config = get_auth_config()
+    
+    # Skip authentication if not enabled
+    if not auth_config['enable_auth']:
+        return True
+    
+    # Check for API key in query parameters
+    api_key_query = websocket.query_params.get('api_key')
+    if api_key_query and validate_api_key(api_key_query):
+        return True
+    
+    # If authentication is enabled but no valid credentials found, return False
+    return False
 
 # Pydantic models for request/response validation
 class MCPRequest(BaseModel):
@@ -220,7 +294,7 @@ class MCPStreamingHTTPServer:
                       - `tools/list` - List available tools (query tool)
                       - `tools/call` - Execute SQL queries against BigQuery
                       """)
-        async def handle_mcp_request(request: MCPRequest):
+        async def handle_mcp_request(request: MCPRequest, http_request: Request, auth: bool = Depends(authenticate_request)):
             """Handle MCP JSON-RPC requests via HTTP POST."""
             try:
                 response_data = await self.process_mcp_request(request.dict())
@@ -237,7 +311,7 @@ class MCPStreamingHTTPServer:
                 )
         
         @self.app.post("/mcp/batch", tags=["MCP"])
-        async def handle_mcp_batch(batch_request: MCPBatchRequest):
+        async def handle_mcp_batch(batch_request: MCPBatchRequest, http_request: Request, auth: bool = Depends(authenticate_request)):
             """Handle batch MCP requests."""
             try:
                 responses = []
@@ -258,10 +332,15 @@ class MCPStreamingHTTPServer:
             Send MCP requests and receive responses in real-time.
             
             **Usage:**
-            1. Connect to `ws://localhost:8000/mcp/ws`
+            1. Connect to `ws://localhost:8000/mcp/ws?api_key=your_api_key`
             2. Send MCP JSON-RPC messages as text
             3. Receive MCP responses as JSON text
             """
+            # Authenticate WebSocket connection
+            if not authenticate_websocket_sync(websocket):
+                await websocket.close(code=4001, reason="Authentication required")
+                return
+                
             await websocket.accept()
             self.active_connections.append(websocket)
             

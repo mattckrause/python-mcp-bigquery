@@ -19,19 +19,86 @@ param googleApplicationCredentialsJson string
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 
-// Tags that should be applied to all resources.
-var tags = {
-  'azd-env-name': environmentName
-  application: 'python-mcp-bq-server'
-}
+@description('Enable authentication (true/false)')
+param enableAuth string = 'false'
+
+@secure()
+@description('API Keys for authentication (comma-separated)')
+param apiKeys string = ''
+
+@secure()
+@description('JWT Secret for token signing/validation')
+param jwtSecret string = ''
 
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
+
+// Tags that should be applied to all resources
+var tags = {
+  'azd-env-name': environmentName
+}
+
+// Key Vault for storing secrets
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: 'kv-mcp-bq-${resourceToken}'
+  location: location
+  tags: tags
+  properties: {
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    tenantId: tenant().tenantId
+    enabledForTemplateDeployment: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 7
+    accessPolicies: [
+      {
+        tenantId: tenant().tenantId
+        objectId: principalId
+        permissions: {
+          secrets: [
+            'get'
+            'list'
+            'set'
+            'delete'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+// Store Google Cloud credentials in Key Vault
+resource googleCredentialsSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  name: 'google-application-credentials'
+  parent: keyVault
+  properties: {
+    value: googleApplicationCredentialsJson
+  }
+}
+
+// Store API keys in Key Vault (if provided)
+resource apiKeysSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (apiKeys != '') {
+  name: 'api-keys'
+  parent: keyVault
+  properties: {
+    value: apiKeys
+  }
+}
+
+// Store JWT secret in Key Vault (if provided)
+resource jwtSecretSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (jwtSecret != '') {
+  name: 'jwt-secret'
+  parent: keyVault
+  properties: {
+    value: jwtSecret
+  }
+}
 
 // Container Registry
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: 'mcpbigquerypy${resourceToken}'
   location: location
-  tags: tags
   sku: {
     name: 'Basic'
   }
@@ -55,7 +122,6 @@ resource registryPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
   name: 'mcpbigquerypy-env-${resourceToken}'
   location: location
-  tags: tags
   properties: {
     zoneRedundant: false
   }
@@ -72,7 +138,8 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
       secrets: [
         {
           name: 'google-credentials'
-          value: googleApplicationCredentialsJson
+          keyVaultUrl: googleCredentialsSecret.properties.secretUri
+          identity: 'system'
         }
       ]
       registries: [
@@ -95,12 +162,24 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           image: 'nginx:latest' // Placeholder - will be updated by azd deploy
           env: [
             {
-              name: 'GOOGLE_CLOUD_PROJECT'
+              name: 'GOOGLE_CLOUD_PROJECT_ID'
               value: googleCloudProject
             }
             {
-              name: 'GOOGLE_APPLICATION_CREDENTIALS_JSON'
-              secretRef: 'google-credentials'
+              name: 'GOOGLE_SERVICE_ACCOUNT_CREDENTIALS'
+              secretRef: googleApplicationCredentialsJson
+            }
+            {
+              name: 'ENABLE_AUTH'
+              value: enableAuth
+            }
+            {
+              name: 'API_KEYS'
+              value: apiKeys
+            }
+            {
+              name: 'JWT_SECRET'
+              value: jwtSecret
             }
           ]
           probes: [
@@ -154,9 +233,29 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
+// Key Vault Access Policy for Container App
+resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2023-07-01' = {
+  name: 'add'
+  parent: keyVault
+  properties: {
+    accessPolicies: [
+      {
+        tenantId: tenant().tenantId
+        objectId: containerApp.identity.principalId
+        permissions: {
+          secrets: [
+            'get'
+          ]
+        }
+      }
+    ]
+  }
+}
+
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_REGISTRY_NAME string = containerRegistry.name
+output AZURE_KEY_VAULT_NAME string = keyVault.name
 output SERVICE_API_NAME string = containerApp.name
 output SERVICE_API_URI string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
 output SERVICE_API_IMAGE_NAME string = 'nginx:latest'

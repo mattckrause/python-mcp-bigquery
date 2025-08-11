@@ -81,3 +81,4 @@ openapi.json
 # --- Local data ---
 .scripts-local/
 .tmp/
+.azure

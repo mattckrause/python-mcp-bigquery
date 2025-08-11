@@ -9,13 +9,19 @@
       "value": "${AZURE_LOCATION}"
     },
     "googleCloudProject": {
-      "value": "${GOOGLE_CLOUD_PROJECT}"
+      "value": "${GOOGLE_CLOUD_PROJECT_ID}"
     },
     "googleApplicationCredentialsJson": {
-      "value": "${GOOGLE_APPLICATION_CREDENTIALS_JSON}"
+      "value": "${GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}"
     },
-    "principalId": {
-      "value": "${AZURE_PRINCIPAL_ID}"
+    "enableAuth": {
+      "value": "${ENABLE_AUTH}"
+    },
+    "apiKeys": {
+      "value": "${API_KEYS}"
+    },
+    "jwtSecret": {
+      "value": "${JWT_SECRET}"
     }
   }
 }
