@@ -1,106 +1,172 @@
-# Pre-provision hook for Azure Developer CLI
-# This script automatically converts Google Cloud credentials to base64 before deployment
+# Setup Google Cloud Credentials for Azure Deployment
+# This script converts your Google service account JSON to base64 format
+# and sets it in your azd environment to avoid JSON parsing errors
 
-Write-Host "Running pre-provision hook: Converting credentials to base64..." -ForegroundColor Cyan
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$KeyFilePath = ".\key-file.json"
+)
 
-# Check if we already have base64 credentials set
-$existingB64 = azd env get-value GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 2>$null
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host "Google Cloud Credentials Setup" -ForegroundColor Cyan
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host ""
 
-if ($existingB64) {
-    Write-Host "Base64 credentials already configured" -ForegroundColor Green
-    exit 0
+# First, try to read from .env file
+$envFile = join-path -Path (split-path -Parent $PSScriptRoot) -ChildPath ".env"
+$jsonContent = $null
+
+if (Test-Path $envFile) {
+    Write-Host "Checking .env file for credentials..." -ForegroundColor Yellow
+    $envContent = Get-Content $envFile | Where-Object { $_ -match "^GOOGLE_SERVICE_ACCOUNT_CREDENTIALS=" }
+    if ($envContent) {
+        # Extract the JSON part after the = sign
+        $jsonContent = $envContent -replace "^GOOGLE_SERVICE_ACCOUNT_CREDENTIALS=", ""
+        Write-Host "Found credentials in .env file" -ForegroundColor Green
+    }
 }
 
-# Check for raw JSON credentials in environment
-$rawCreds = azd env get-value GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>$null
-
-if (-not $rawCreds) {
-    # Try to find a key file in common locations
-    $possiblePaths = @(
-        ".\key-file.json",
-        ".\gcp-credentials.json",
-        ".\credentials.json",
-        ".\service-account.json",
-        ".\.azure\key-file.json"
-    )
-    
-    $foundPath = $null
-    foreach ($path in $possiblePaths) {
-        if (Test-Path $path) {
-            $foundPath = $path
-            Write-Host "Found credentials file at: $foundPath" -ForegroundColor Yellow
-            break
-        }
-    }
-    
-    if ($foundPath) {
-        # Read the credentials from file
-        $rawCreds = Get-Content -Raw $foundPath
-        
-        # Extract project ID from the JSON
-        try {
-            $jsonObj = $rawCreds | ConvertFrom-Json
-            if ($jsonObj.project_id) {
-                azd env set GOOGLE_CLOUD_PROJECT_ID $jsonObj.project_id 2>&1 | Out-Null
-                Write-Host "Set GOOGLE_CLOUD_PROJECT_ID to: $($jsonObj.project_id)" -ForegroundColor Green
-            }
-        } catch {
-            Write-Host "Warning: Could not parse project_id from credentials" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "ERROR: No Google Cloud credentials found!" -ForegroundColor Red
+# Fallback to key file if .env doesn't have credentials
+if (-not $jsonContent) {
+    # Check if the key file exists
+    if (-not (Test-Path $KeyFilePath)) {
+        Write-Host "Error: No credentials found in .env file and key file not found at: $KeyFilePath" -ForegroundColor Red
+        Write-Host ""
         Write-Host "Please either:" -ForegroundColor Yellow
-        Write-Host "  1. Place your service account JSON file as 'key-file.json' in the project root" -ForegroundColor Yellow
-        Write-Host "  2. Run: azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS '<your-json-content>'" -ForegroundColor Yellow
+        Write-Host "  1. Add GOOGLE_SERVICE_ACCOUNT_CREDENTIALS=<json> to your .env file" -ForegroundColor Yellow
+        Write-Host "  2. Ensure you have your Google service account JSON file saved as:" -ForegroundColor Yellow
+        Write-Host "     $KeyFilePath" -ForegroundColor Yellow
+        Write-Host "  3. Run this script with a different path:" -ForegroundColor Yellow
+        Write-Host "     .\setup-credentials.ps1 -KeyFilePath 'path\to\your\key.json'" -ForegroundColor Yellow
         exit 1
     }
+    
+    Write-Host "Reading from key file at: $KeyFilePath" -ForegroundColor Green
+    $jsonContent = Get-Content -Raw $KeyFilePath
 }
 
-# Convert to base64
-Write-Host "Converting credentials to base64..." -ForegroundColor Yellow
+Write-Host ""
+
+# Read and validate the JSON
+Write-Host "Validating JSON format..." -ForegroundColor Yellow
 try {
-    $base64Credentials = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($rawCreds))
+    $jsonObject = $jsonContent | ConvertFrom-Json
     
-    # Set the base64 version
-    azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 $base64Credentials 2>&1 | Out-Null
-    Write-Host "Successfully set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64" -ForegroundColor Green
+    # Check for required fields
+    if (-not $jsonObject.project_id) {
+        throw "Missing 'project_id' field in JSON"
+    }
+    if (-not $jsonObject.client_email) {
+        throw "Missing 'client_email' field in JSON"
+    }
     
-    # Remove the raw JSON version to avoid confusion
-    azd env unset GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>&1 | Out-Null
-    
+    Write-Host "✓ JSON validation successful" -ForegroundColor Green
+    Write-Host "  Project ID: $($jsonObject.project_id)" -ForegroundColor Gray
+    Write-Host "  Client Email: $($jsonObject.client_email)" -ForegroundColor Gray
+    Write-Host ""
 } catch {
-    Write-Host "ERROR: Failed to convert credentials to base64: $_" -ForegroundColor Red
+    Write-Host "Error: Invalid JSON format - $_" -ForegroundColor Red
     exit 1
 }
 
-# Ensure other required variables have defaults
+# Convert to base64
+Write-Host "Converting to base64..." -ForegroundColor Yellow
+$base64Credentials = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($jsonContent))
+Write-Host "✓ Base64 conversion successful" -ForegroundColor Green
+Write-Host ""
+
+# Set in azd environment
+Write-Host "Setting azd environment variables..." -ForegroundColor Yellow
+
+# Set the base64 credentials
+try {
+    azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS $base64Credentials 2>&1 | Out-Null
+    Write-Host "✓ Set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS (base64)" -ForegroundColor Green
+} catch {
+    Write-Host "Error setting GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: $_" -ForegroundColor Red
+    exit 1
+}
+
+# Remove any old variables to avoid confusion
+try {
+    azd env unset GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>&1 | Out-Null
+    Write-Host "✓ Removed old GOOGLE_SERVICE_ACCOUNT_CREDENTIALS (if existed)" -ForegroundColor Green
+} catch {
+    # It's okay if this fails - the variable might not exist
+}
+
+try {
+    azd env unset GOOGLE_APPLICATION_CREDENTIALS_JSON 2>&1 | Out-Null
+    Write-Host "✓ Removed old GOOGLE_APPLICATION_CREDENTIALS_JSON (if existed)" -ForegroundColor Green
+} catch {
+    # It's okay if this fails - the variable might not exist
+}
+
+# Also set the project ID if not already set
+if ($jsonObject.project_id) {
+    try {
+        azd env set GOOGLE_CLOUD_PROJECT_ID $jsonObject.project_id 2>&1 | Out-Null
+        Write-Host "✓ Set GOOGLE_CLOUD_PROJECT_ID to: $($jsonObject.project_id)" -ForegroundColor Green
+    } catch {
+        Write-Host "Warning: Could not set GOOGLE_CLOUD_PROJECT_ID: $_" -ForegroundColor Yellow
+    }
+}
+
+# Set other required variables if not set
+Write-Host ""
+Write-Host "Checking other required environment variables..." -ForegroundColor Yellow
+
+# Check AZURE_ENV_NAME
 $envName = azd env get-value AZURE_ENV_NAME 2>$null
 if (-not $envName) {
+    Write-Host "Setting AZURE_ENV_NAME to default value..." -ForegroundColor Yellow
     azd env set AZURE_ENV_NAME "python-bq-mcp" 2>&1 | Out-Null
-    Write-Host "Set AZURE_ENV_NAME to default: python-bq-mcp" -ForegroundColor Green
+    Write-Host "✓ Set AZURE_ENV_NAME to: python-bq-mcp" -ForegroundColor Green
+} else {
+    Write-Host "✓ AZURE_ENV_NAME already set to: $envName" -ForegroundColor Green
 }
 
+# Check AZURE_LOCATION
 $location = azd env get-value AZURE_LOCATION 2>$null
 if (-not $location) {
+    Write-Host "Setting AZURE_LOCATION to default value..." -ForegroundColor Yellow
     azd env set AZURE_LOCATION "centralus" 2>&1 | Out-Null
-    Write-Host "Set AZURE_LOCATION to default: centralus" -ForegroundColor Green
+    Write-Host "✓ Set AZURE_LOCATION to: centralus" -ForegroundColor Green
+} else {
+    Write-Host "✓ AZURE_LOCATION already set to: $location" -ForegroundColor Green
 }
 
+# Set authentication variables to defaults if not set
 $enableAuth = azd env get-value ENABLE_AUTH 2>$null
 if (-not $enableAuth) {
     azd env set ENABLE_AUTH "false" 2>&1 | Out-Null
-    Write-Host "Set ENABLE_AUTH to default: false" -ForegroundColor Green
+    Write-Host "✓ Set ENABLE_AUTH to: false (default)" -ForegroundColor Green
+} else {
+    Write-Host "✓ ENABLE_AUTH already set to: $enableAuth" -ForegroundColor Green
 }
 
-# Ensure empty strings for optional auth parameters
+# Ensure API_KEYS and JWT_SECRET are at least empty strings
 $apiKeys = azd env get-value API_KEYS 2>$null
 if ($null -eq $apiKeys) {
     azd env set API_KEYS "" 2>&1 | Out-Null
+    Write-Host "✓ Set API_KEYS to: (empty)" -ForegroundColor Green
 }
 
 $jwtSecret = azd env get-value JWT_SECRET 2>$null
 if ($null -eq $jwtSecret) {
     azd env set JWT_SECRET "" 2>&1 | Out-Null
+    Write-Host "✓ Set JWT_SECRET to: (empty)" -ForegroundColor Green
 }
 
-Write-Host "Pre-provision hook completed successfully!" -ForegroundColor Green
+Write-Host ""
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host "Setup Complete!" -ForegroundColor Green
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Your credentials have been converted to base64 and stored as:" -ForegroundColor Green
+Write-Host "  - GOOGLE_SERVICE_ACCOUNT_CREDENTIALS" -ForegroundColor White
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor Yellow
+Write-Host "  1. Run 'azd up' to deploy your application" -ForegroundColor White
+Write-Host "  2. The application will decode the base64 credentials at runtime" -ForegroundColor White
+Write-Host ""

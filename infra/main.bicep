@@ -37,7 +37,7 @@ var tags = {
   'azd-env-name': environmentName
 }
 
-// Key Vault for storing secrets
+// Key Vault for storing secrets  
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: 'kv-mcp-bq-${resourceToken}'
   location: location
@@ -51,6 +51,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enabledForTemplateDeployment: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
+    enableRbacAuthorization: true  // Enable RBAC instead of access policies
     accessPolicies: principalId != '' ? [
       {
         tenantId: tenant().tenantId
@@ -131,21 +132,28 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-05-01'
 resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'mcpbigquerypy-api-${resourceToken}'
   location: location
-  tags: tags
+  tags: union(tags, {
+    'azd-service-name': 'python-mcp-bigquery'
+  })
   properties: {
     managedEnvironmentId: containerAppsEnvironment.id
     configuration: {
       secrets: [
         {
-          name: 'google-credentials'
+          name: 'google-application-credentials'
           keyVaultUrl: googleCredentialsSecret.properties.secretUri
           identity: 'system'
+        }
+        {
+          name: 'registry-password'
+          value: containerRegistry.listCredentials().passwords[0].value
         }
       ]
       registries: [
         {
           server: containerRegistry.properties.loginServer
-          identity: 'system'
+          username: containerRegistry.listCredentials().username
+          passwordSecretRef: 'registry-password'
         }
       ]
       ingress: {
@@ -167,7 +175,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'GOOGLE_APPLICATION_CREDENTIALS_JSON'
-              secretRef: 'google-credentials'
+              secretRef: 'google-application-credentials'
             }
             {
               name: 'ENABLE_AUTH'
@@ -182,34 +190,39 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: jwtSecret
             }
           ]
-          probes: [
-            {
-              type: 'Liveness'
-              httpGet: {
-                path: '/health'
-                port: 8000
-                scheme: 'HTTP'
-              }
-              initialDelaySeconds: 60
-              periodSeconds: 60
-              timeoutSeconds: 30
-              successThreshold: 1
-              failureThreshold: 5
-            }
-            {
-              type: 'Readiness'
-              httpGet: {
-                path: '/health'
-                port: 8000
-                scheme: 'HTTP'
-              }
-              initialDelaySeconds: 30
-              periodSeconds: 30
-              timeoutSeconds: 30
-              successThreshold: 1
-              failureThreshold: 10
-            }
-          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1.0Gi'
+          }
+          // Temporarily disable health checks to debug container startup
+          // probes: [
+          //   {
+          //     type: 'Liveness'
+          //     httpGet: {
+          //       path: '/health'
+          //       port: 8000
+          //       scheme: 'HTTP'
+          //     }
+          //     initialDelaySeconds: 60
+          //     periodSeconds: 60
+          //     timeoutSeconds: 30
+          //     successThreshold: 1
+          //     failureThreshold: 5
+          //   }
+          //   {
+          //     type: 'Readiness'
+          //     httpGet: {
+          //       path: '/health'
+          //       port: 8000
+          //       scheme: 'HTTP'
+          //     }
+          //     initialDelaySeconds: 30
+          //     periodSeconds: 30
+          //     timeoutSeconds: 30
+          //     successThreshold: 1
+          //     failureThreshold: 10
+          //   }
+          // ]
         }
       ]
       scale: {
@@ -233,22 +246,14 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
-// Key Vault Access Policy for Container App
-resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2023-07-01' = {
-  name: 'add'
-  parent: keyVault
+// Key Vault Secret User role assignment for Container App managed identity
+resource keyVaultSecretUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, containerApp.id, 'Key Vault Secrets User')
+  scope: keyVault
   properties: {
-    accessPolicies: [
-      {
-        tenantId: tenant().tenantId
-        objectId: containerApp.identity.principalId
-        permissions: {
-          secrets: [
-            'get'
-          ]
-        }
-      }
-    ]
+    principalId: containerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
   }
 }
 
@@ -258,4 +263,4 @@ output AZURE_REGISTRY_NAME string = containerRegistry.name
 output AZURE_KEY_VAULT_NAME string = keyVault.name
 output SERVICE_API_NAME string = containerApp.name
 output SERVICE_API_URI string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
-output SERVICE_API_IMAGE_NAME string = 'nginx:latest'
+output SERVICE_API_IMAGE_NAME string = 'python-mcp-bigquery-python-bq-mcp:latest'

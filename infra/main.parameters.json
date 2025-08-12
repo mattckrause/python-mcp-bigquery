@@ -12,7 +12,7 @@
       "value": "${GOOGLE_CLOUD_PROJECT_ID}"
     },
     "googleApplicationCredentialsJson": {
-      "value": "${GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64}"
+      "value": "${GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}"
     },
     "enableAuth": {
       "value": "${ENABLE_AUTH}"
