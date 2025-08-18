@@ -254,31 +254,41 @@ class MCPStreamingHTTPServer:
             return HealthResponse()
         
         @self.app.get("/openapi.yaml", tags=["Documentation"])
-        async def get_openapi_yaml():
-            """Serve OpenAPI specification in YAML format."""
+        async def get_openapi_yaml(request: Request):
+            """Serve OpenAPI specification in YAML format with correct server URL."""
             import yaml
             from pathlib import Path
-            
-            # Try to read the OpenAPI spec file
+            from fastapi.openapi.utils import get_openapi
+
+            # Compute base URL from the incoming request (works behind proxies)
+            base_url = str(request.base_url).rstrip('/')
+
+            # Prepare an OpenAPI document either from file or generated
             openapi_file = Path(__file__).parent.parent.parent / "openapi.yaml"
             if openapi_file.exists():
-                return Response(
-                    content=openapi_file.read_text(),
-                    media_type="application/x-yaml"
-                )
-            else:
-                # Fallback to FastAPI's built-in OpenAPI
-                from fastapi.openapi.utils import get_openapi
-                openapi_schema = get_openapi(
-                    title=self.app.title,
-                    version=self.app.version,
-                    description=self.app.description,
-                    routes=self.app.routes,
-                )
-                return Response(
-                    content=yaml.dump(openapi_schema, default_flow_style=False),
-                    media_type="application/x-yaml"
-                )
+                try:
+                    doc = yaml.safe_load(openapi_file.read_text()) or {}
+                    # Ensure 'servers' reflects the current deployment URL
+                    doc["servers"] = [{"url": base_url}]
+                    return Response(
+                        content=yaml.dump(doc, default_flow_style=False),
+                        media_type="application/x-yaml"
+                    )
+                except Exception as e:  # noqa: E722 (broad except acceptable for fallback)
+                    logger.warning(f"Failed to load static openapi.yaml, falling back to generated: {e}")
+
+            # Fallback to FastAPI's built-in OpenAPI and inject servers
+            openapi_schema = get_openapi(
+                title=self.app.title,
+                version=self.app.version,
+                description=self.app.description,
+                routes=self.app.routes,
+            )
+            openapi_schema["servers"] = [{"url": base_url}]
+            return Response(
+                content=yaml.dump(openapi_schema, default_flow_style=False),
+                media_type="application/x-yaml"
+            )
         
         @self.app.post("/mcp", 
                       response_model=MCPResponse, 

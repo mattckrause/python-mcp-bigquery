@@ -15,14 +15,25 @@ Write-Host ""
 # First, try to read from .env file
 $envFile = join-path -Path (split-path -Parent $PSScriptRoot) -ChildPath ".env"
 $jsonContent = $null
+$dotenv = @{}
 
 if (Test-Path $envFile) {
-    Write-Host "Checking .env file for credentials..." -ForegroundColor Yellow
-    $envContent = Get-Content $envFile | Where-Object { $_ -match "^GOOGLE_SERVICE_ACCOUNT_CREDENTIALS=" }
-    if ($envContent) {
-        # Extract the JSON part after the = sign
-        $jsonContent = $envContent -replace "^GOOGLE_SERVICE_ACCOUNT_CREDENTIALS=", ""
-        Write-Host "Found credentials in .env file" -ForegroundColor Green
+    Write-Host "Reading .env for overrides..." -ForegroundColor Yellow
+    $lineRegex = '^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=(.*)$'
+    foreach ($line in Get-Content $envFile) {
+        if ($line -match '^[ \t]*#') { continue }
+        if ($line -match $lineRegex) {
+            $key = $matches[1]
+            $val = $matches[2].Trim()
+            # Strip surrounding quotes if present
+            if ($val.StartsWith('"') -and $val.EndsWith('"')) { $val = $val.Substring(1, $val.Length - 2) }
+            $dotenv[$key] = $val
+        }
+    }
+    # Extract credentials JSON if provided inline in .env
+    if ($dotenv.ContainsKey('GOOGLE_SERVICE_ACCOUNT_CREDENTIALS')) {
+        $jsonContent = $dotenv['GOOGLE_SERVICE_ACCOUNT_CREDENTIALS']
+        Write-Host "Found GOOGLE_SERVICE_ACCOUNT_CREDENTIALS in .env" -ForegroundColor Green
     }
 }
 
@@ -95,8 +106,24 @@ try {
     # It's okay if this fails - the variable might not exist
 }
 
-# Also set the project ID if not already set
-if ($jsonObject.project_id) {
+# Apply .env overrides for common variables first (preferred over defaults)
+Write-Host "Applying .env overrides (if present)..." -ForegroundColor Yellow
+foreach ($k in @('GOOGLE_CLOUD_PROJECT_ID','ENABLE_AUTH','API_KEYS','JWT_SECRET')) {
+    if ($dotenv.ContainsKey($k)) {
+        $v = $dotenv[$k]
+        if ($k -eq 'ENABLE_AUTH') { $v = ($v.ToLower() -eq 'true') ? 'true' : 'false' }
+        try {
+            azd env set $k $v 2>&1 | Out-Null
+            Write-Host "✓ Set $k from .env" -ForegroundColor Green
+        } catch {
+            Write-Host "Warning: Could not set $k from .env: $_" -ForegroundColor Yellow
+        }
+    }
+}
+
+# Also set the project ID from the credentials JSON if not already set via .env
+$existingProj = azd env get-value GOOGLE_CLOUD_PROJECT_ID 2>$null
+if (-not $existingProj -and $jsonObject.project_id) {
     try {
         azd env set GOOGLE_CLOUD_PROJECT_ID $jsonObject.project_id 2>&1 | Out-Null
         Write-Host "✓ Set GOOGLE_CLOUD_PROJECT_ID to: $($jsonObject.project_id)" -ForegroundColor Green
@@ -129,13 +156,13 @@ if (-not $location) {
     Write-Host "✓ AZURE_LOCATION already set to: $location" -ForegroundColor Green
 }
 
-# Set authentication variables to defaults if not set
+# Set authentication variables to defaults if not set (after .env overrides)
 $enableAuth = azd env get-value ENABLE_AUTH 2>$null
 if (-not $enableAuth) {
     azd env set ENABLE_AUTH "false" 2>&1 | Out-Null
     Write-Host "✓ Set ENABLE_AUTH to: false (default)" -ForegroundColor Green
 } else {
-    Write-Host "✓ ENABLE_AUTH already set to: $enableAuth" -ForegroundColor Green
+    Write-Host "✓ ENABLE_AUTH set to: $enableAuth" -ForegroundColor Green
 }
 
 # Ensure API_KEYS and JWT_SECRET are at least empty strings
