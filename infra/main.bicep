@@ -13,8 +13,8 @@ param location string = resourceGroup().location
 param googleCloudProject string
 
 @secure()
-@description('Google Cloud Service Account credentials JSON')
-param googleApplicationCredentialsJson string
+@description('Google Cloud Service Account credentials JSON (base64-encoded)')
+param googleApplicationCredentialsBase64 string
 
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
@@ -74,7 +74,7 @@ resource googleCredentialsSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
   name: 'google-application-credentials'
   parent: keyVault
   properties: {
-    value: googleApplicationCredentialsJson
+  value: googleApplicationCredentialsBase64
   }
 }
 

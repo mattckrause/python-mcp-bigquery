@@ -5,7 +5,7 @@
 echo -e "\033[36mRunning pre-provision hook: Converting credentials to base64...\033[0m"
 
 # Check if we already have base64 credentials set
-existingB64=$(azd env get-value GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 2>/dev/null)
+existingB64=$(azd env get-value GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>/dev/null)
 
 if [ -n "$existingB64" ]; then
     echo -e "\033[32mBase64 credentials already configured\033[0m"
@@ -13,7 +13,7 @@ if [ -n "$existingB64" ]; then
 fi
 
 # Check for raw JSON credentials in environment
-rawCreds=$(azd env get-value GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>/dev/null)
+rawCreds=$(azd env get-value GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_RAW 2>/dev/null)
 
 if [ -z "$rawCreds" ]; then
     # Try to find a key file in common locations
@@ -59,11 +59,10 @@ base64Credentials=$(echo -n "$rawCreds" | base64 | tr -d '\n')
 
 if [ $? -eq 0 ]; then
     # Set the base64 version
-    azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 "$base64Credentials" 2>&1 >/dev/null
-    echo -e "\033[32mSuccessfully set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64\033[0m"
-    
-    # Remove the raw JSON version to avoid confusion
-    azd env unset GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>&1 >/dev/null
+    azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS "$base64Credentials" 2>&1 >/dev/null
+    echo -e "\033[32mSuccessfully set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS\033[0m"
+    # Remove the old variable name if present
+    azd env unset GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 2>&1 >/dev/null
 else
     echo -e "\033[31mERROR: Failed to convert credentials to base64\033[0m"
     exit 1

@@ -148,23 +148,46 @@ Examples:
     
     # Try to get credentials from environment
     credentials_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    
-    # The credentials should now be raw JSON (not base64) from Key Vault
+
+    # The credentials should be JSON; detect and handle base64, and validate private_key formatting early
     if credentials_json:
+        decoded_bytes: Optional[bytes] = None
+        # First try JSON directly
         try:
-            # Verify it's valid JSON
-            json.loads(credentials_json)
+            parsed = json.loads(credentials_json)
+            decoded_bytes = credentials_json.encode("utf-8")
             logger.info("Using JSON credentials from environment")
         except json.JSONDecodeError:
-            # If it's not valid JSON, try to decode as base64 (fallback)
+            # If not JSON, try strict base64 decode
             try:
-                decoded = base64.b64decode(credentials_json)
-                json.loads(decoded)
-                credentials_json = decoded.decode('utf-8')
+                decoded_bytes = base64.b64decode(credentials_json, validate=True)
+                parsed = json.loads(decoded_bytes)
+                credentials_json = decoded_bytes.decode('utf-8')
                 logger.info("Decoded base64-encoded credentials from environment")
-            except (base64.binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
-                logger.error("Invalid credentials format - not valid JSON or base64")
+            except (base64.binascii.Error, json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.error(f"Invalid GOOGLE_APPLICATION_CREDENTIALS_JSON: not valid JSON or base64 ({e})")
                 credentials_json = None
+                parsed = None
+
+        # If we have parsed JSON, validate service_account structure and private_key PEM formatting
+        if parsed and isinstance(parsed, dict):
+            if parsed.get('type') != 'service_account':
+                logger.error("Credentials JSON 'type' must be 'service_account'")
+            pk = parsed.get('private_key')
+            if not pk or not isinstance(pk, str):
+                logger.error("Credentials JSON missing 'private_key' or it's not a string")
+            else:
+                # Accept both escaped newlines (\n) and real newlines
+                normalized = pk.replace('\\n', '\n')
+                has_header = normalized.strip().startswith('-----BEGIN PRIVATE KEY-----')
+                has_footer = normalized.strip().endswith('-----END PRIVATE KEY-----')
+                if not (has_header and has_footer):
+                    logger.error("Credentials private_key must include proper PEM header/footer: 'BEGIN PRIVATE KEY'/'END PRIVATE KEY'")
+                # Ensure there is at least one newline between header and footer
+                if '-----BEGIN PRIVATE KEY-----' in normalized and '-----END PRIVATE KEY-----' in normalized:
+                    inner = normalized.strip()[len('-----BEGIN PRIVATE KEY-----'): -len('-----END PRIVATE KEY-----')]
+                    if '\n' not in inner:
+                        logger.error("Credentials private_key appears to be single-line without newlines; ensure newlines are preserved or use \\n escapes in JSON")
     
     config = ServerConfig(
         project_id=project_id,
@@ -219,6 +242,10 @@ class BigQueryMCPServer:
                 
                 # Parse JSON credentials and create credentials object
                 credentials_data = json.loads(self.config.credentials_json)
+                # Normalize private_key newlines if they are escaped
+                if isinstance(credentials_data, dict) and isinstance(credentials_data.get('private_key'), str):
+                    pk = credentials_data['private_key']
+                    credentials_data['private_key'] = pk.replace('\\n', '\n')
                 credentials = service_account.Credentials.from_service_account_info(
                     credentials_data
                 )

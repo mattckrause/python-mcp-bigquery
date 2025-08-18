@@ -89,13 +89,6 @@ try {
 
 # Remove any old variables to avoid confusion
 try {
-    azd env unset GOOGLE_SERVICE_ACCOUNT_CREDENTIALS 2>&1 | Out-Null
-    Write-Host "✓ Removed old GOOGLE_SERVICE_ACCOUNT_CREDENTIALS (if existed)" -ForegroundColor Green
-} catch {
-    # It's okay if this fails - the variable might not exist
-}
-
-try {
     azd env unset GOOGLE_APPLICATION_CREDENTIALS_JSON 2>&1 | Out-Null
     Write-Host "✓ Removed old GOOGLE_APPLICATION_CREDENTIALS_JSON (if existed)" -ForegroundColor Green
 } catch {
@@ -156,6 +149,18 @@ $jwtSecret = azd env get-value JWT_SECRET 2>$null
 if ($null -eq $jwtSecret) {
     azd env set JWT_SECRET "" 2>&1 | Out-Null
     Write-Host "✓ Set JWT_SECRET to: (empty)" -ForegroundColor Green
+}
+
+# Set container registry endpoint if registry name exists
+$registryName = azd env get-value AZURE_REGISTRY_NAME 2>$null
+if ($registryName) {
+    $registryEndpoint = azd env get-value AZURE_CONTAINER_REGISTRY_ENDPOINT 2>$null
+    if (-not $registryEndpoint) {
+        azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT "$registryName.azurecr.io" 2>&1 | Out-Null
+        Write-Host "✓ Set AZURE_CONTAINER_REGISTRY_ENDPOINT to: $registryName.azurecr.io" -ForegroundColor Green
+    } else {
+        Write-Host "✓ AZURE_CONTAINER_REGISTRY_ENDPOINT already set to: $registryEndpoint" -ForegroundColor Green
+    }
 }
 
 Write-Host ""

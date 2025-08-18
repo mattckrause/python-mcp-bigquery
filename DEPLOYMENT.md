@@ -63,7 +63,7 @@ If you prefer to set up credentials manually:
 ```powershell
 # Convert credentials to base64
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -Raw .\key-file.json)))
-azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 $b64
+azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS $b64
 
 # Set other required variables
 azd env set GOOGLE_CLOUD_PROJECT_ID "your-project-id"
@@ -75,7 +75,7 @@ azd env set AZURE_LOCATION "centralus"
 ```bash
 # Convert credentials to base64
 export B64=$(cat key-file.json | base64 | tr -d '\n')
-azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64 "$B64"
+azd env set GOOGLE_SERVICE_ACCOUNT_CREDENTIALS "$B64"
 
 # Set other required variables
 azd env set GOOGLE_CLOUD_PROJECT_ID "your-project-id"
@@ -87,7 +87,7 @@ azd env set AZURE_LOCATION "centralus"
 
 - **`hooks/preprovision.ps1`**: PowerShell hook for Windows
 - **`hooks/preprovision.sh`**: Bash hook for Linux/Mac
-- **`infra/main.parameters.json`**: Uses `${GOOGLE_SERVICE_ACCOUNT_CREDENTIALS_B64}`
+- **`infra/main.parameters.json`**: Uses `${GOOGLE_SERVICE_ACCOUNT_CREDENTIALS}`
 - **`src/mcp_bigquery_server/main.py`**: Automatically decodes base64 credentials
 
 ## Troubleshooting
