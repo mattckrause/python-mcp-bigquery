@@ -2,175 +2,80 @@
 import logging
 import os
 from typing import Any, Dict, List, Optional
+
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger(__name__)
 
 # Authentication configuration
 security = HTTPBearer(auto_error=False)
 
-def get_auth_config():
+
+def get_auth_config() -> Dict[str, Any]:
     return {
-        'enable_auth': os.getenv('ENABLE_AUTH', 'false').lower() == 'true',
-        'api_keys': set(key.strip() for key in os.getenv('API_KEYS', '').split(',') if key.strip()),
-        'jwt_secret': os.getenv('JWT_SECRET', '')
+        "enable_auth": os.getenv("ENABLE_AUTH", "false").lower() == "true",
+        "api_keys": set(k.strip() for k in os.getenv("API_KEYS", "").split(",") if k.strip()),
+        "jwt_secret": os.getenv("JWT_SECRET", ""),
     }
 
+
 def validate_api_key(api_key: str) -> bool:
-    auth_config = get_auth_config()
-    return api_key in auth_config['api_keys']
+    return api_key in get_auth_config()["api_keys"]
+
 
 def validate_jwt_token(token: str) -> bool:
-    # This is a basic implementation - you might want to use a proper JWT library
-    # like PyJWT for production use
-    auth_config = get_auth_config()
-    if not auth_config['jwt_secret']:
+    auth = get_auth_config()
+    if not auth["jwt_secret"]:
         return False
-    
-    # For now, just check if the token is not empty and secret is configured
-    # In a real implementation, you would decode and validate the JWT
-    return bool(token and auth_config['jwt_secret'])
+    # Minimal check; use PyJWT in production
+    return bool(token)
 
-async def authenticate_request(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    auth_config = get_auth_config()
 
-    # Skip authentication if not enabled
-    if not auth_config['enable_auth']:
+async def authenticate_request(
+    request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> bool:
+    auth = get_auth_config()
+    if not auth["enable_auth"]:
         return True
 
-    # Check for API key in header
-    api_key_header = request.headers.get('X-API-Key')
+    # API key in header
+    api_key_header = request.headers.get("X-API-Key")
     if api_key_header and validate_api_key(api_key_header):
         return True
 
-    # Check for API key in query parameters
-    api_key_query = request.query_params.get('api_key')
+    # API key in query
+    api_key_query = request.query_params.get("api_key")
     if api_key_query and validate_api_key(api_key_query):
         return True
 
-    # Check for JWT token in Authorization header
+    # Bearer JWT
     if credentials and validate_jwt_token(credentials.credentials):
         return True
 
-    # If authentication is enabled but no valid credentials found, raise error
-    raise HTTPException(
-        status_code=401, 
-        detail="Authentication required. Provide X-API-Key header, api_key query parameter, or valid JWT token."
-    )
+    raise HTTPException(status_code=401, detail="Authentication required")
 
-def authenticate_websocket_sync(websocket: WebSocket):
-    auth_config = get_auth_config()
-
-    # Skip authentication if not enabled
-    if not auth_config['enable_auth']:
-        return True
-
-    # Check for API key in query parameters
-    api_key_query = websocket.query_params.get('api_key')
-    if api_key_query and validate_api_key(api_key_query):
-        return True
-
-    # If authentication is enabled but no valid credentials found, return False
-    return False
-
-# Pydantic models for request/response validation
-class MCPRequest(BaseModel):
-    jsonrpc: str = Field(default="2.0", description="JSON-RPC version (must be '2.0')")
-    id: Optional[Any] = Field(None, description="Request ID (can be string, number, or null)")
-    method: str = Field(..., description="MCP method name", 
-                        examples=["initialize", "resources/list", "resources/read", "tools/list", "tools/call"])
-    params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Method-specific parameters")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "my-app", "version": "1.0.0"}
-                    }
-                },
-                {
-                    "jsonrpc": "2.0", 
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "query",
-                        "arguments": {
-                            "sql": "SELECT COUNT(*) FROM `bigquery-public-data.usa_names.usa_1910_current`"
-                        }
-                    }
-                }
-            ]
-        }
-    }
-
-class MCPResponse(BaseModel):
-    jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
-    id: Optional[Any] = Field(None, description="Request ID matching the request")
-    result: Optional[Any] = Field(None, description="Success result data")
-    error: Optional[Dict[str, Any]] = Field(None, description="Error information (code, message, data)")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "serverInfo": {"name": "mcp-server/bigquery", "version": "0.1.0"}
-                    }
-                },
-                {
-                    "jsonrpc": "2.0",
-                    "id": 2, 
-                    "result": {
-                        "content": [{"type": "text", "text": '[{"count": 42}]'}]
-                    }
-                }
-            ]
-        }
-    }
-
-class MCPBatchRequest(BaseModel):
-    requests: List[MCPRequest] = Field(..., description="List of MCP requests to execute", min_length=1)
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "requests": [
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 1, 
-                        "method": "tools/list",
-                        "params": {}
-                    },
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "method": "resources/list", 
-                        "params": {}
-                    }
-                ]
-            }
-        }
-    }
 
 class HealthResponse(BaseModel):
-    status: str = Field(default="healthy", description="Server health status")
-    server: str = Field(default="mcp-bigquery", description="Server name")
-    version: str = Field(default="1.0.0", description="Server version")
+    status: str = Field(default="healthy")
+    server: str = Field(default="mcp-bigquery")
+    version: str = Field(default="1.0.0")
+
+
+class QueryRequest(BaseModel):
+    sql: str = Field(..., description="Read-only BigQuery SQL")
+    maximumBytesBilled: Optional[str] = Field(
+        default=None, description="Maximum bytes billed (string). Default from server if omitted."
+    )
+
+
+class QueryResponse(BaseModel):
+    rows: List[Dict[str, Any]] = Field(default_factory=list, description="Query result rows")
+
 
 class MCPStreamingHTTPServer:
     def __init__(self, mcp_server, host: str = "127.0.0.1", port: int = 8000):
@@ -179,364 +84,145 @@ class MCPStreamingHTTPServer:
         self.port = port
         self.app = FastAPI(
             title="MCP BigQuery Server",
-            description="""
-            HTTP transport for MCP (Model Context Protocol) BigQuery server with streaming support.
-            This API provides access to Google BigQuery through the Model Context Protocol, allowing you to execute SQL queries, browse datasets, and read table schemas.
-            All SQL queries are validated to ensure only read-only operations (SELECT statements) are allowed.
-            """,
+            description="REST API for MCP (Model Context Protocol) BigQuery server.",
             version="1.0.0",
-            contact={
-                "name": "MCP BigQuery Server",
-            },
-            license_info={
-                "name": "MIT",
-            },
+            contact={"name": "MCP BigQuery Server"},
+            license_info={"name": "MIT"},
             docs_url="/docs",
-            redoc_url="/redoc"
+            redoc_url="/redoc",
         )
 
-        # Add CORS middleware
+        # CORS
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],  # Configure appropriately for production
+            allow_origins=["*"],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
         )
 
         self.setup_routes()
-        self.active_connections: List[WebSocket] = []
-    
-    def setup_routes(self):
 
+    def setup_routes(self) -> None:
         @self.app.get("/health", response_model=HealthResponse, tags=["Health"])
-        async def health_check():
+        async def health_check() -> HealthResponse:
             return HealthResponse()
 
         @self.app.get("/openapi.yaml", tags=["Documentation"])
         async def get_openapi_yaml(request: Request):
             import yaml
-            from pathlib import Path
             from fastapi.openapi.utils import get_openapi
 
-            # Compute base URL from the incoming request (works behind proxies)
-            base_url = str(request.base_url).rstrip('/')
-            def inject_auth(doc: dict) -> dict:
-                """Inject security schemes and requirements when auth is enabled."""
-                try:
-                    enable_auth = os.getenv('ENABLE_AUTH', 'false').lower() == 'true'
-                    if not enable_auth:
-                        return doc
-                    # Ensure components/securitySchemes
-                    components = doc.setdefault('components', {})
-                    security_schemes = components.setdefault('securitySchemes', {})
-                    # API Key via header
-                    security_schemes.setdefault('APIKeyHeader', {
-                        'type': 'apiKey',
-                        'in': 'header',
-                        'name': 'X-API-Key',
-                        'description': 'Provide a valid API key in the X-API-Key header.'
-                    })
-                    # API Key via query
-                    security_schemes.setdefault('APIKeyQuery', {
-                        'type': 'apiKey',
-                        'in': 'query',
-                        'name': 'api_key',
-                        'description': 'Provide a valid API key as the api_key query parameter.'
-                    })
-                    # Bearer token (JWT)
-                    security_schemes.setdefault('BearerAuth', {
-                        'type': 'http',
-                        'scheme': 'bearer',
-                        'bearerFormat': 'JWT',
-                        'description': 'Provide a Bearer token in the Authorization header.'
-                    })
+            base_url = str(request.base_url).rstrip("/")
 
-                    # Apply security requirements to protected paths
-                    paths = doc.get('paths', {})
-                    protected = [
-                        ('/mcp', 'post'),
-                        ('/mcp/batch', 'post'),
-                        # add more routes here if needed
-                    ]
-                    requirement_or = [
-                        {'APIKeyHeader': []},
-                        {'APIKeyQuery': []},
-                        {'BearerAuth': []}
-                    ]
-                    for p, m in protected:
+            def inject_auth(doc: dict) -> dict:
+                try:
+                    if not get_auth_config()["enable_auth"]:
+                        return doc
+                    components = doc.setdefault("components", {})
+                    security_schemes = components.setdefault("securitySchemes", {})
+                    security_schemes.setdefault("APIKeyHeader", {"type": "apiKey", "in": "header", "name": "X-API-Key"})
+                    security_schemes.setdefault("APIKeyQuery", {"type": "apiKey", "in": "query", "name": "api_key"})
+                    security_schemes.setdefault("BearerAuth", {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"})
+                    # Protect REST endpoints
+                    paths = doc.get("paths", {})
+                    requirement_or = [{"APIKeyHeader": []}, {"APIKeyQuery": []}, {"BearerAuth": []}]
+                    for p, m in [("/query", "post"), ("/resources", "get"), ("/resources/read", "get")]:
                         op = paths.get(p, {}).get(m)
                         if isinstance(op, dict):
-                            op['security'] = requirement_or
+                            op["security"] = requirement_or
                     return doc
                 except Exception as e:
                     logger.warning(f"Failed to inject auth into OpenAPI: {e}")
                     return doc
 
-            # Prepare an OpenAPI document either from file or generated
-            openapi_file = Path(__file__).parent.parent.parent / "openapi.yaml"
-            if openapi_file.exists():
-                try:
-                    doc = yaml.safe_load(openapi_file.read_text()) or {}
-                    # Ensure 'servers' reflects the current deployment URL
-                    doc["servers"] = [{"url": base_url}]
-                    # Inject auth when enabled
-                    doc = inject_auth(doc)
-                    return Response(
-                        content=yaml.dump(doc, default_flow_style=False),
-                        media_type="application/x-yaml"
-                    )
-                except Exception as e:  # noqa: E722 (broad except acceptable for fallback)
-                    logger.warning(f"Failed to load static openapi.yaml, falling back to generated: {e}")
-
-            # Fallback to FastAPI's built-in OpenAPI and inject servers
-            openapi_schema = get_openapi(
+            schema = get_openapi(
                 title=self.app.title,
                 version=self.app.version,
                 description=self.app.description,
                 routes=self.app.routes,
             )
-            openapi_schema["servers"] = [{"url": base_url}]
-            openapi_schema = inject_auth(openapi_schema)
-            return Response(
-                content=yaml.dump(openapi_schema, default_flow_style=False),
-                media_type="application/x-yaml"
-            )
+            schema["servers"] = [{"url": base_url}]
+            schema = inject_auth(schema)
+            return Response(content=yaml.dump(schema, default_flow_style=False), media_type="application/x-yaml")
 
-        @self.app.post("/mcp", 
-                        response_model=MCPResponse, 
-                        tags=["MCP"],
-                        summary="Execute MCP JSON-RPC request",
-                        description="Execute Model Context Protocol commands via JSON-RPC over HTTP.")
-        async def handle_mcp_request(request: MCPRequest, http_request: Request, auth: bool = Depends(authenticate_request)):
+        @self.app.post(
+            "/query",
+            response_model=QueryResponse,
+            tags=["SQL"],
+            summary="Execute read-only SQL",
+            description="Runs a read-only BigQuery query and returns rows.",
+        )
+        async def rest_query(req: QueryRequest, http_request: Request, auth: bool = Depends(authenticate_request)):
             try:
-                response_data = await self.process_mcp_request(request.dict())
-                return MCPResponse(**response_data)
+                args: Dict[str, Any] = {"sql": req.sql}
+                if req.maximumBytesBilled is not None:
+                    args["maximumBytesBilled"] = req.maximumBytesBilled
+                # Reuse MCP tool handler logic
+                result = await self.mcp_server.call_tool_handler("query", args)
+                rows: List[Dict[str, Any]] = []
+                if result and isinstance(result, list):
+                    first = result[0]
+                    text = getattr(first, "text", None)
+                    if isinstance(text, str):
+                        try:
+                            parsed = json.loads(text)
+                            if isinstance(parsed, list):
+                                rows = parsed
+                        except json.JSONDecodeError:
+                            pass
+                return QueryResponse(rows=rows)
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error(f"Error processing MCP request: {e}")
-                return MCPResponse(
-                    id=request.id,
-                    error={
-                        "code": -32603,
-                        "message": "Internal error",
-                        "data": str(e)
-                    }
-                )
-
-        @self.app.post("/mcp/batch", tags=["MCP"])
-        async def handle_mcp_batch(batch_request: MCPBatchRequest, http_request: Request, auth: bool = Depends(authenticate_request)):
-            try:
-                responses = []
-                for req in batch_request.requests:
-                    response_data = await self.process_mcp_request(req.dict())
-                    responses.append(MCPResponse(**response_data))
-                return responses
-            except Exception as e:
-                logger.error(f"Error processing batch MCP request: {e}")
+                logger.error(f"REST /query error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
-        @self.app.websocket("/mcp/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            # Authenticate WebSocket connection
-            if not authenticate_websocket_sync(websocket):
-                await websocket.close(code=4001, reason="Authentication required")
-                return
-
-            await websocket.accept()
-            self.active_connections.append(websocket)
-
-            try:
-                while True:
-                    # Receive MCP request from WebSocket
-                    data = await websocket.receive_text()
-                    request_data = json.loads(data)
-
-                    # Process MCP request
-                    response_data = await self.process_mcp_request(request_data)
-
-                    # Send response back through WebSocket
-                    await websocket.send_text(json.dumps(response_data))
-
-            except WebSocketDisconnect:
-                self.active_connections.remove(websocket)
-                logger.info("WebSocket client disconnected")
-            except Exception as e:
-                logger.error(f"WebSocket error: {e}")
-                self.active_connections.remove(websocket)
-
-        @self.app.get("/mcp/stream", tags=["Streaming"])
-        async def stream_endpoint():
-            async def event_generator():
-                # This is a basic implementation - you can extend this
-                # to stream query results or other long-running operations
-                yield {
-                    "event": "connected",
-                    "data": json.dumps({"message": "Stream connected"})
-                }
-            
-            return EventSourceResponse(event_generator())
-
-    async def process_mcp_request(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            method = request_data.get("method")
-            params = request_data.get("params", {})
-            request_id = request_data.get("id")
-
-            if method == "initialize":
-                result = await self.handle_initialize(params)
-            elif method == "resources/list":
-                result = await self.handle_list_resources()
-            elif method == "resources/read":
-                result = await self.handle_read_resource(params)
-            elif method == "tools/list":
-                result = await self.handle_list_tools()
-            elif method == "tools/call":
-                result = await self.handle_call_tool(params)
-            else:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method not found: {method}"
-                    }
-                }
-
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": result
-            }
-
-        except Exception as e:
-            logger.error(f"Error processing MCP request: {e}")
-            return {
-                "jsonrpc": "2.0",
-                "id": request_data.get("id"),
-                "error": {
-                    "code": -32603,
-                    "message": "Internal error",
-                    "data": str(e)
-                }
-            }
-
-    async def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "resources": {
-                    "subscribe": False,
-                    "listChanged": False
-                },
-                "tools": {},
-                "prompts": {}
-            },
-            "serverInfo": {
-                "name": "mcp-server/bigquery",
-                "version": "0.1.0"
-            }
-        }
-
-    async def handle_list_resources(self) -> Dict[str, Any]:
-        # Get the handler from the MCP server
-        resources = []
-        try:
-            # Call the server's list_resources handler
-            resource_list = await self.mcp_server.list_resources_handler()
-            resources = [
-                {
-                    "uri": resource.uri,
-                    "mimeType": resource.mimeType,
-                    "name": resource.name
-                }
-                for resource in resource_list
-            ]
-        except Exception as e:
-            logger.error(f"Error listing resources: {e}")
-            raise
-        return {"resources": resources}
-
-    async def handle_read_resource(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        uri = params.get("uri")
-        if not uri:
-            raise ValueError("Missing required parameter: uri")
-
-        try:
-            # Call the server's read_resource handler
-            content = await self.mcp_server.read_resource_handler(uri)
-            return {
-                "contents": [
-                    {
-                        "uri": uri,
-                        "mimeType": "application/json",
-                        "text": content
-                    }
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error reading resource {uri}: {e}")
-            raise
-
-    async def handle_list_tools(self) -> Dict[str, Any]:
-        try:
-            # Call the server's list_tools handler
-            tool_list = await self.mcp_server.list_tools_handler()
-            tools = [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "inputSchema": tool.inputSchema
-                }
-                for tool in tool_list
-            ]
-            return {"tools": tools}
-        except Exception as e:
-            logger.error(f"Error listing tools: {e}")
-            raise
-
-    async def handle_call_tool(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        name = params.get("name")
-        arguments = params.get("arguments", {})
-
-        if not name:
-            raise ValueError("Missing required parameter: name")
-
-        try:
-            # Call the server's call_tool handler
-            result = await self.mcp_server.call_tool_handler(name, arguments)
-            return {
-                "content": [
-                    {
-                        "type": content.type,
-                        "text": content.text
-                    }
-                    for content in result
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error calling tool {name}: {e}")
-            raise
-
-    async def start(self):
-        logger.info(f"Starting MCP BigQuery HTTP server on {self.host}:{self.port}")
-
-        config = uvicorn.Config(
-            app=self.app,
-            host=self.host,
-            port=self.port,
-            log_level="info"
+        @self.app.get(
+            "/resources",
+            tags=["Resources"],
+            summary="List resources",
+            description="Lists available BigQuery resources (datasets and tables).",
         )
+        async def rest_list_resources(http_request: Request, auth: bool = Depends(authenticate_request)):
+            try:
+                resource_list = await self.mcp_server.list_resources_handler()
+                return [
+                    {"uri": r.uri, "mimeType": r.mimeType, "name": r.name}
+                    for r in resource_list
+                ]
+            except Exception as e:
+                logger.error(f"REST /resources error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
+        @self.app.get(
+            "/resources/read",
+            tags=["Resources"],
+            summary="Read resource",
+            description="Reads a resource by URI and returns its content. Provide ?uri=bigquery://project/dataset/table/schema",
+        )
+        async def rest_read_resource(uri: str, http_request: Request, auth: bool = Depends(authenticate_request)):
+            if not uri:
+                raise HTTPException(status_code=400, detail="Missing 'uri' query parameter")
+            try:
+                content = await self.mcp_server.read_resource_handler(uri)
+                try:
+                    return json.loads(content)
+                except Exception:
+                    return {"text": content}
+            except Exception as e:
+                logger.error(f"REST /resources/read error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+    async def start(self) -> None:
+        logger.info(f"Starting MCP BigQuery HTTP server on {self.host}:{self.port}")
+        config = uvicorn.Config(app=self.app, host=self.host, port=self.port, log_level="info")
         server = uvicorn.Server(config)
         await server.serve()
+
 
 # For direct execution testing
 if __name__ == "__main__":
     import sys
-    import os
-
-    # Add parent directory to path for imports
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-    # This would need the main server to be initialized
     print("HTTP server module loaded. Use main.py to start the server.")
