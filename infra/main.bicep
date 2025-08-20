@@ -26,10 +26,6 @@ param enableAuth string = 'false'
 @description('API Keys for authentication (comma-separated)')
 param apiKeys string = ''
 
-@secure()
-@description('JWT Secret for token signing/validation')
-param jwtSecret string = ''
-
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
 // Tags that should be applied to all resources
@@ -84,15 +80,6 @@ resource apiKeysSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (apiK
   parent: keyVault
   properties: {
     value: apiKeys
-  }
-}
-
-// Store JWT secret in Key Vault (if provided)
-resource jwtSecretSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (jwtSecret != '') {
-  name: 'jwt-secret'
-  parent: keyVault
-  properties: {
-    value: jwtSecret
   }
 }
 
@@ -185,10 +172,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'API_KEYS'
               value: apiKeys
             }
-            {
-              name: 'JWT_SECRET'
-              value: jwtSecret
-            }
+            // JWT env removed
           ]
           resources: {
             cpu: json('0.5')

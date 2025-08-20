@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# Authentication configuration
-security = HTTPBearer(auto_error=False)
+# Authentication configuration (JWT disabled; using only X-API-Key header)
+# Keeping HTTPBearer import to avoid breaking changes, but not used.
 
 
 def get_auth_config() -> Dict[str, Any]:
@@ -29,16 +29,11 @@ def validate_api_key(api_key: str) -> bool:
 
 
 def validate_jwt_token(token: str) -> bool:
-    auth = get_auth_config()
-    if not auth["jwt_secret"]:
-        return False
-    # Minimal check; use PyJWT in production
-    return bool(token)
+    # JWT auth disabled
+    return False
 
 
-async def authenticate_request(
-    request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
-) -> bool:
+async def authenticate_request(request: Request) -> bool:
     auth = get_auth_config()
     if not auth["enable_auth"]:
         return True
@@ -46,15 +41,6 @@ async def authenticate_request(
     # API key in header
     api_key_header = request.headers.get("X-API-Key")
     if api_key_header and validate_api_key(api_key_header):
-        return True
-
-    # API key in query
-    api_key_query = request.query_params.get("api_key")
-    if api_key_query and validate_api_key(api_key_query):
-        return True
-
-    # Bearer JWT
-    if credentials and validate_jwt_token(credentials.credentials):
         return True
 
     raise HTTPException(status_code=401, detail="Authentication required")
@@ -121,20 +107,61 @@ class MCPStreamingHTTPServer:
                         return doc
                     components = doc.setdefault("components", {})
                     security_schemes = components.setdefault("securitySchemes", {})
-                    security_schemes.setdefault("APIKeyHeader", {"type": "apiKey", "in": "header", "name": "X-API-Key"})
-                    security_schemes.setdefault("APIKeyQuery", {"type": "apiKey", "in": "query", "name": "api_key"})
-                    security_schemes.setdefault("BearerAuth", {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"})
+                    security_schemes.setdefault(
+                        "APIKeyHeader",
+                        {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+                    )
                     # Protect REST endpoints
                     paths = doc.get("paths", {})
-                    requirement_or = [{"APIKeyHeader": []}, {"APIKeyQuery": []}, {"BearerAuth": []}]
-                    for p, m in [("/query", "post"), ("/resources", "get"), ("/resources/read", "get")]:
+                    requirement = [{"APIKeyHeader": []}]
+                    for p, m in [
+                        ("/query", "post"),
+                        ("/resources", "get"),
+                        ("/resources/read", "get"),
+                    ]:
                         op = paths.get(p, {}).get(m)
                         if isinstance(op, dict):
-                            op["security"] = requirement_or
+                            op["security"] = requirement
                     return doc
                 except Exception as e:
                     logger.warning(f"Failed to inject auth into OpenAPI: {e}")
                     return doc
+
+            def oas31_nullable_to_oas30(node):
+                """Convert OpenAPI 3.1 nullable patterns to OpenAPI 3.0 style.
+                - anyOf: [<T>, {type: null}] => T + nullable: true
+                - type: [<T>, null] => type: T + nullable: true
+                Works recursively across the document.
+                """
+                if isinstance(node, dict):
+                    # Handle anyOf with null
+                    any_of = node.get("anyOf")
+                    if isinstance(any_of, list):
+                        non_null = [s for s in any_of if not (isinstance(s, dict) and s.get("type") == "null")]
+                        has_null = any(isinstance(s, dict) and s.get("type") == "null" for s in any_of)
+                        if has_null and len(non_null) == 1 and isinstance(non_null[0], dict):
+                            # Replace current node with non-null schema + nullable: true
+                            converted = oas31_nullable_to_oas30(non_null[0].copy())
+                            node.clear()
+                            node.update(converted)
+                            node["nullable"] = True
+
+                    # Handle type arrays including null
+                    t = node.get("type")
+                    if isinstance(t, list):
+                        non_null_types = [x for x in t if x != "null"]
+                        if len(non_null_types) == 1 and len(non_null_types) != len(t):
+                            node["type"] = non_null_types[0]
+                            node["nullable"] = True
+
+                    # Recurse
+                    for k, v in list(node.items()):
+                        node[k] = oas31_nullable_to_oas30(v)
+                    return node
+                elif isinstance(node, list):
+                    return [oas31_nullable_to_oas30(x) for x in node]
+                else:
+                    return node
 
             schema = get_openapi(
                 title=self.app.title,
@@ -142,8 +169,12 @@ class MCPStreamingHTTPServer:
                 description=self.app.description,
                 routes=self.app.routes,
             )
+            # Force OpenAPI 3.0.4 for compatibility and remove 3.1-only fields
+            schema["openapi"] = "3.0.4"
+            schema.pop("jsonSchemaDialect", None)
             schema["servers"] = [{"url": base_url}]
             schema = inject_auth(schema)
+            schema = oas31_nullable_to_oas30(schema)
             return Response(content=yaml.dump(schema, default_flow_style=False), media_type="application/x-yaml")
 
         @self.app.post(
