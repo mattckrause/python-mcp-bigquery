@@ -244,6 +244,7 @@ resource keyVaultSecretUserRole 'Microsoft.Authorization/roleAssignments@2022-04
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_REGISTRY_NAME string = containerRegistry.name
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.properties.loginServer
 output AZURE_KEY_VAULT_NAME string = keyVault.name
 output SERVICE_API_NAME string = containerApp.name
 output SERVICE_API_URI string = 'https://${containerApp.properties.configuration.ingress.fqdn}'

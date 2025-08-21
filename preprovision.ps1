@@ -13,9 +13,10 @@ Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
 
 # First, try to read from .env file
-$envFile = join-path -Path (split-path -Parent $PSScriptRoot) -ChildPath ".env"
+$envFile = Join-Path $PSScriptRoot '.env'
 $jsonContent = $null
 $dotenv = @{}
+Write-Host $envFile
 
 if (Test-Path $envFile) {
     Write-Host "Reading .env for overrides..." -ForegroundColor Yellow

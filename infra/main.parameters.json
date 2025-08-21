@@ -19,9 +19,6 @@
     },
     "apiKeys": {
       "value": "${API_KEYS}"
-    },
-    "jwtSecret": {
-      "value": "${JWT_SECRET}"
     }
   }
 }

@@ -121,7 +121,7 @@ notepad .env
 ## Google Cloud
 # Project ID used by the server
 GOOGLE_CLOUD_PROJECT=your-project-id
-# Service account credentials (JSON string or base64-encoded JSON)
+# Service account credentials (JSON string) all one line.
 GOOGLE_APPLICATION_CREDENTIALS_JSON={"type":"service_account",...}
 
 ## Azure (for deployment)
@@ -166,14 +166,16 @@ docker run -p 8000:8000 --env-file .env mcp-bigquery-server
 
 ## ☁️ Azure Deployment
 
-### Quick Deploy
-
 ```powershell
+# Run preprovision script to set up Azure variables
+./proprovision.ps1
+
 # Initialize Azure environment (first time only)
 azd init
 
 # Deploy to Azure
 azd up
+# you need to select the Azure Subscription and Resource Group as part of the deployment.
 ```
 
 The deployment will:
@@ -181,25 +183,6 @@ The deployment will:
 1. Create Azure resources (Key Vault, ACR, Container Apps)
 2. Build and push the Docker image
 3. Deploy the Container App with environment variables and secrets
-
-### Manual Azure Resources
-
-If you prefer manual setup:
-
-```powershell
-# Create resource group
-az group create --name rg-mcp-bigquery --location centralus
-
-# Create container registry
-az acr create --resource-group rg-mcp-bigquery \
-  --name mcpbigqueryregistry --sku Basic
-
-# Create container apps environment
-az containerapp env create \
-  --name mcp-bigquery-env \
-  --resource-group rg-mcp-bigquery \
-  --location centralus
-```text
 
 ### Accessing Your Deployed API
 
