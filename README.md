@@ -1,6 +1,6 @@
 ﻿# MCP BigQuery Server
 
-A **Model Context Protocol (MCP) server** for Google BigQuery integration, providing secure access to BigQuery datasets through both stdio and HTTP transports. Built with Python, FastAPI, and deployed on Azure Container Apps.
+A Model Context Protocol (MCP) server for Google BigQuery integration, providing secure access to BigQuery datasets via stdio or a simple REST API. Built with Python and FastAPI and deployable to Azure Container Apps.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -8,17 +8,16 @@ A **Model Context Protocol (MCP) server** for Google BigQuery integration, provi
 
 ## 🚀 Features
 
-- **Dual Transport Support**: Both stdio (for local MCP clients) and HTTP/WebSocket (for web applications)
-- **Google BigQuery Integration**: Query datasets, explore schemas, and manage BigQuery resources
-- **Azure Container Apps Deployment**: Production-ready containerized deployment with auto-scaling
-- **Authentication Options**: API keys, JWT tokens, or no authentication for development
-- **Real-time Streaming**: Server-Sent Events (SSE) and WebSocket support for live data feeds
-- **OpenAPI Documentation**: Auto-generated API docs at `/docs` and `/openapi.json`
-- **Health Monitoring**: Built-in health checks and observability
+- Dual transport: stdio (for MCP clients) and HTTP (REST)
+- BigQuery integration: query datasets and explore table schemas
+- Azure Container Apps deployment with auto-scaling
+- Authentication: API key via header (optional, dev-friendly toggle)
+- OpenAPI docs: `/docs` and an OpenAPI 3.0.4 YAML at `/openapi.yaml`
+- Health checks at `/health`
 
 ## 🏗️ Architecture
 
-```
+```text
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   MCP Client    │────│  MCP BigQuery    │────│  Google Cloud   │
 │  (stdio/HTTP)   │    │     Server       │    │    BigQuery     │
@@ -31,20 +30,23 @@ A **Model Context Protocol (MCP) server** for Google BigQuery integration, provi
 ```
 
 **Components:**
-- **MCP Server**: Implements the Model Context Protocol specification
-- **HTTP Server**: FastAPI-based REST API with streaming endpoints
-- **BigQuery Client**: Google Cloud BigQuery Python SDK integration
-- **Container Runtime**: Docker container deployed on Azure Container Apps
-- **Authentication Layer**: Optional API key and JWT token validation
+
+- MCP server implementing the Model Context Protocol
+- FastAPI-based REST layer for simple HTTP access
+- Google Cloud BigQuery Python SDK client
+- Docker container for Azure Container Apps
+- Authentication layer: optional API key header
 
 ## 📋 Prerequisites
 
 ### For Local Development
+
 - **Python 3.8+**
 - **Google Cloud Project** with BigQuery API enabled
 - **Service Account** with BigQuery permissions (Job User, Data Viewer)
 
 ### For Azure Deployment
+
 - **Azure CLI** (`az`) installed and authenticated
 - **Azure Developer CLI** (`azd`) installed
 - **Docker Desktop** (for container building)
@@ -64,18 +66,20 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1  # Windows
 # source venv/bin/activate    # Linux/macOS
 
-# Install dependencies
-pip install -e .
+# Install dependencies (project uses standard Python packages)
+pip install -r requirements.txt
 ```
 
 ### 2. Google Cloud Configuration
 
 1. **Enable BigQuery API**:
+   
    ```powershell
    gcloud services enable bigquery.googleapis.com
    ```
 
 2. **Create Service Account**:
+   
    ```powershell
    gcloud iam service-accounts create mcp-bigquery-server \
      --description="Service account for MCP BigQuery Server" \
@@ -83,6 +87,7 @@ pip install -e .
    ```
 
 3. **Assign Permissions**:
+   
    ```powershell
    gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
      --member="serviceAccount:mcp-bigquery-server@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
@@ -94,6 +99,7 @@ pip install -e .
    ```
 
 4. **Download Credentials**:
+   
    ```powershell
    gcloud iam service-accounts keys create credentials.json \
      --iam-account=mcp-bigquery-server@YOUR_PROJECT_ID.iam.gserviceaccount.com
@@ -110,19 +116,23 @@ notepad .env
 ```
 
 **Required Configuration**:
-```bash
-# Google Cloud
-GOOGLE_CLOUD_PROJECT_ID=your-project-id
-GOOGLE_SERVICE_ACCOUNT_CREDENTIALS={"type":"service_account",...}
 
-# Azure (for deployment)
+```bash
+## Google Cloud
+# Project ID used by the server
+GOOGLE_CLOUD_PROJECT=your-project-id
+# Service account credentials (JSON string or base64-encoded JSON)
+GOOGLE_APPLICATION_CREDENTIALS_JSON={"type":"service_account",...}
+
+## Azure (for deployment)
 AZURE_ENV_NAME=mcp-bigquery
 AZURE_LOCATION=centralus
 
-# Authentication (optional)
+## Authentication (optional)
+# When true, all REST endpoints (except /health) require X-API-Key
 ENABLE_AUTH=false
+# Comma-separated list, e.g. key1,key2
 API_KEYS=your-api-key-here
-JWT_SECRET=your-jwt-secret-here
 ```
 
 ## 🏃‍♂️ Running the Server
@@ -131,17 +141,17 @@ JWT_SECRET=your-jwt-secret-here
 
 ```powershell
 # Run as MCP stdio server
-python src/mcp_bigquery_server/main.py --project-id <bigqurey projectID> --key-file <path to service account keyfile>
+python src/mcp_bigquery_server/main.py --project-id <project_id> --key-file <path_to_service_account_keyfile>
 ```
 
-### Local HTTP Server
+### Local HTTP Server (REST)
 
 ```powershell
-# Run HTTP server
-python src/mcp_bigquery_server/main.py --project-id <bigqurey projectID> --key-file <path to service account keyfile> --http --port <port>
+# Run HTTP server (reads GOOGLE_APPLICATION_CREDENTIALS_JSON when set)
+python src/mcp_bigquery_server/main.py --project-id <project_id> --http --port 8000
 
-# Server runs on http://localhost:<port>
-# API docs at http://localhost:<port>/docs
+# Server runs on http://localhost:8000
+# Docs at http://localhost:8000/docs
 ```
 
 ### Docker (Local)
@@ -167,11 +177,10 @@ azd up
 ```
 
 The deployment will:
-1. Create Azure Container Registry
-2. Build and push Docker image
-3. Create Container Apps environment
-4. Deploy your application with auto-scaling
-5. Configure environment variables from `.env`
+
+1. Create Azure resources (Key Vault, ACR, Container Apps)
+2. Build and push the Docker image
+3. Deploy the Container App with environment variables and secrets
 
 ### Manual Azure Resources
 
@@ -190,24 +199,24 @@ az containerapp env create \
   --name mcp-bigquery-env \
   --resource-group rg-mcp-bigquery \
   --location centralus
-```
+```text
 
 ### Accessing Your Deployed API
 
 After deployment, `azd` will provide your Container Apps URL:
 
-```
+```text
 https://your-app.kindriverbank-12345678.centralus.azurecontainerapps.io
 ```
 
-**Endpoints**:
-- `GET /health` - Health check (always public)
-- `POST /mcp` - MCP protocol endpoint
-- `POST /mcp/batch` - Batch MCP requests
-- `GET /mcp/stream` - Server-Sent Events stream
-- `GET /mcp/ws` - WebSocket connection
-- `GET /docs` - Interactive API documentation
-- `GET /openapi.yaml` - OpenAPI specification
+**REST Endpoints**:
+
+- `GET /health` - Health check (public)
+- `POST /query` - Execute read-only BigQuery SQL
+- `GET /resources` - List BigQuery resources (datasets/tables)
+- `GET /resources/read?uri=bigquery://project/dataset/table/schema` - Read schema/content
+- `GET /docs` - Interactive API documentation (Swagger UI)
+- `GET /openapi.yaml` - OpenAPI 3.0.4 specification (authoritative)
 
 ## 🔧 Configuration Options
 
@@ -215,52 +224,39 @@ https://your-app.kindriverbank-12345678.centralus.azurecontainerapps.io
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `GOOGLE_CLOUD_PROJECT_ID` | Yes | Google Cloud project ID | - |
-| `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` | Yes | Service account JSON (single line) | - |
+| `GOOGLE_CLOUD_PROJECT` | Yes | Google Cloud project ID | - |
+| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Yes | Service account JSON or base64 of JSON | - |
 | `AZURE_ENV_NAME` | For deployment | Azure environment name | `mcp-bigquery` |
 | `AZURE_LOCATION` | For deployment | Azure region | `centralus` |
-| `ENABLE_AUTH` | No | Enable authentication | `false` |
+| `ENABLE_AUTH` | No | Enable API key authentication | `false` |
 | `API_KEYS` | If auth enabled | Comma-separated API keys | - |
-| `JWT_SECRET` | For JWT auth | JWT signing secret | - |
 | `PORT` | No | HTTP server port | `8000` |
 | `HOST` | No | HTTP server host | `0.0.0.0` |
 
-### Authentication Modes
+### Authentication
 
-#### 1. No Authentication (Development)
+No Authentication (Development)
+
 ```bash
 ENABLE_AUTH=false
 ```
 
-#### 2. API Key Authentication
+API Key Authentication (header only)
+
 ```bash
 ENABLE_AUTH=true
 API_KEYS=key1,key2,key3
 ```
 
-**Usage**:
+Usage
+
 ```powershell
-# Header-based
-$headers = @{ "X-API-Key" = "your-api-key" }
-Invoke-RestMethod -Uri "https://your-app.azurecontainerapps.io/mcp" -Method POST -Headers $headers -Body $body
-
-# Query parameter
-$uri = "https://your-app.azurecontainerapps.io/mcp?api_key=your-api-key"
+$headers = @{ "X-API-Key" = "your-api-key"; "Content-Type" = "application/json" }
+$body = '{"sql":"SELECT 1 AS x"}'
+Invoke-RestMethod -Uri "https://your-app.azurecontainerapps.io/query" -Method POST -Headers $headers -Body $body
 ```
 
-#### 3. JWT Token Authentication
-```bash
-ENABLE_AUTH=true
-JWT_SECRET=your-secret-key
-```
-
-**Usage**:
-```powershell
-$headers = @{ "Authorization" = "Bearer your-jwt-token" }
-Invoke-RestMethod -Uri "https://your-app.azurecontainerapps.io/mcp" -Method POST -Headers $headers -Body $body
-```
-
-## 📖 API Usage Examples
+## 📖 API Usage Examples (REST)
 
 ### Health Check
 
@@ -271,54 +267,27 @@ Write-Output $response
 # Output: {"status": "healthy", "timestamp": "2025-01-15T10:30:00Z"}
 ```
 
-### MCP Query Example
+### Run a SQL Query
 
 ```powershell
-# Example MCP request
-$body = @{
-    jsonrpc = "2.0"
-    id = 1
-    method = "resources/list"
-    params = @{}
-} | ConvertTo-Json -Depth 10
-
-$headers = @{
-    "Content-Type" = "application/json"
-    "X-API-Key" = "your-api-key"  # If authentication enabled
-}
-
-$response = Invoke-RestMethod -Uri "https://your-app.azurecontainerapps.io/mcp" -Method POST -Headers $headers -Body $body
-Write-Output $response
+$headers = @{ "X-API-Key" = "your-api-key"; "Content-Type" = "application/json" }
+$body = '{"sql":"SELECT 1 AS x"}'
+Invoke-RestMethod -Uri "https://your-app.azurecontainerapps.io/query" -Method POST -Headers $headers -Body $body
 ```
 
-### Streaming Data (SSE)
+### List Resources
 
 ```powershell
-# PowerShell SSE example (requires additional setup)
-$uri = "https://your-app.azurecontainerapps.io/mcp/stream"
 $headers = @{ "X-API-Key" = "your-api-key" }
-
-# Use curl for SSE streaming
-curl -H "X-API-Key: your-api-key" -H "Accept: text/event-stream" $uri
+Invoke-RestMethod -Uri "https://your-app.azurecontainerapps.io/resources" -Method GET -Headers $headers
 ```
 
-### WebSocket Connection
+### Read a Resource (Schema)
 
-```javascript
-// JavaScript WebSocket example
-const ws = new WebSocket('wss://your-app.azurecontainerapps.io/mcp/ws?api_key=your-api-key');
-
-ws.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-    console.log('Received:', data);
-};
-
-ws.send(JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "resources/list",
-    params: {}
-}));
+```powershell
+$headers = @{ "X-API-Key" = "your-api-key" }
+$uri = "https://your-app.azurecontainerapps.io/resources/read?uri=bigquery://your-project/your_dataset/your_table/schema"
+Invoke-RestMethod -Uri $uri -Method GET -Headers $headers
 ```
 
 ## 🔍 Monitoring & Troubleshooting
@@ -396,20 +365,16 @@ flake8 src/
 mypy src/
 ```
 
-### Local Development with Hot Reload
+### Local Development (HTTP)
 
 ```powershell
-# Install development dependencies
-pip install -e ".[http,dev]"
-
-# Run with auto-reload
-uvicorn mcp_bigquery_server.http_server:app --reload --host 0.0.0.0 --port 8000
+python src/mcp_bigquery_server/main.py --project-id <project_id> --http --port 8000
 ```
 
 ## 📚 Documentation
 
-- **API Documentation**: Available at `/docs` when running the HTTP server
-- **OpenAPI Specification**: Available at `/openapi.json`
+- API documentation: `/docs`
+- OpenAPI specification (3.0.4 YAML): `/openapi.yaml`
 - **Model Context Protocol**: [MCP Specification](https://modelcontextprotocol.io)
 - **Google BigQuery API**: [BigQuery Documentation](https://cloud.google.com/bigquery/docs)
 - **Azure Container Apps**: [Container Apps Documentation](https://docs.microsoft.com/azure/container-apps/)
