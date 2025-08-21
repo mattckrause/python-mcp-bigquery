@@ -9,12 +9,11 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
-
 import anyio
 from mcp import types
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
-import mcp.server.stdio
+from mcp.server.stdio import stdio_server
 from google.cloud import bigquery
 
 # Configure logging
@@ -22,8 +21,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ServerConfig:
-    """Configuration class for the BigQuery MCP server."""
-    
     def __init__(
         self,
         project_id: str,
@@ -37,8 +34,6 @@ class ServerConfig:
         self.credentials_json = credentials_json
 
 async def validate_config(config: ServerConfig) -> None:
-    """Validate the server configuration."""
-    
     # Check if key file exists and is readable
     if config.key_filename:
         key_path = Path(config.key_filename).resolve()
@@ -52,7 +47,7 @@ async def validate_config(config: ServerConfig) -> None:
             
             # Update config to use resolved path
             config.key_filename = str(key_path)
-            
+
             # Validate file contents
             try:
                 with open(key_path, 'r') as f:
@@ -70,7 +65,7 @@ async def validate_config(config: ServerConfig) -> None:
         except Exception as error:
             logger.error(f'File access error: {error}')
             raise
-    
+
     elif config.credentials_json:
         # Validate JSON credentials from environment variable
         try:
@@ -84,13 +79,12 @@ async def validate_config(config: ServerConfig) -> None:
                 
         except json.JSONDecodeError:
             raise ValueError('Invalid JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable')
-    
+
     # Validate project ID format (basic check)
     if not re.match(r'^[a-z0-9-]+$', config.project_id):
         raise ValueError('Invalid project ID format')
 
 def parse_args() -> ServerConfig:
-    """Parse command line arguments and environment variables."""
     parser = argparse.ArgumentParser(
         description="MCP BigQuery Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -101,51 +95,51 @@ Examples:
   %(prog)s --project-id my-project --http --port 8000
         """
     )
-    
+
     parser.add_argument(
         '--project-id',
         required=True,
         help='Google Cloud Project ID'
     )
-    
+
     parser.add_argument(
         '--location',
         default='US',
         help='BigQuery location/region (default: US)'
     )
-    
+
     parser.add_argument(
         '--key-file',
         help='Path to service account key file'
     )
-    
+
     # HTTP transport options
     parser.add_argument(
         '--http',
         action='store_true',
         help='Enable HTTP transport (instead of stdio)'
     )
-    
+
     parser.add_argument(
         '--port',
         type=int,
         default=8000,
         help='HTTP server port (default: 8000)'
     )
-    
+
     parser.add_argument(
         '--host',
         default='127.0.0.1',
         help='HTTP server host (default: 127.0.0.1)'
     )
-    
+
     args = parser.parse_args()
-    
+
     # Check for environment variables
     project_id = args.project_id or os.getenv('GOOGLE_CLOUD_PROJECT')
     if not project_id:
         parser.error("Missing required argument: --project-id or GOOGLE_CLOUD_PROJECT environment variable")
-    
+
     # Try to get credentials from environment
     credentials_json = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
 
@@ -188,24 +182,22 @@ Examples:
                     inner = normalized.strip()[len('-----BEGIN PRIVATE KEY-----'): -len('-----END PRIVATE KEY-----')]
                     if '\n' not in inner:
                         logger.error("Credentials private_key appears to be single-line without newlines; ensure newlines are preserved or use \\n escapes in JSON")
-    
+
     config = ServerConfig(
         project_id=project_id,
         location=args.location,
         key_filename=args.key_file,
         credentials_json=credentials_json
     )
-    
+
     # Store HTTP transport options
     config.use_http = args.http
     config.http_host = args.host
     config.http_port = args.port
-    
+
     return config
 
 class BigQueryMCPServer:
-    """MCP Server implementation for BigQuery integration."""
-    
     def __init__(self, config: ServerConfig):
         self.config = config
         self.bigquery_client = None
@@ -215,9 +207,8 @@ class BigQueryMCPServer:
         # Initialize MCP server
         self.server = Server("mcp-server/bigquery")
         self.setup_handlers()
-    
+
     async def initialize_bigquery(self):
-        """Initialize the BigQuery client."""
         try:
             logger.info(f"Initializing BigQuery with project ID: {self.config.project_id} and location: {self.config.location}")
             
@@ -259,13 +250,10 @@ class BigQueryMCPServer:
         except Exception as error:
             logger.error(f'BigQuery initialization error: {error}')
             raise
-    
+
     def setup_handlers(self):
-        """Set up MCP request handlers."""
-        
         @self.server.list_resources()
         async def handle_list_resources() -> List[types.Resource]:
-            """List all BigQuery resources (datasets and tables/views)."""
             try:
                 logger.info('Fetching datasets...')
                 datasets = list(self.bigquery_client.list_datasets())
@@ -298,10 +286,9 @@ class BigQueryMCPServer:
             except Exception as error:
                 logger.error(f'Error in list_resources: {error}')
                 raise
-        
+
         @self.server.read_resource()
         async def handle_read_resource(uri: str) -> str:
-            """Read a specific BigQuery resource (table/view schema)."""
             try:
                 # Convert uri to string if it's not already
                 uri_str = str(uri)
@@ -336,10 +323,9 @@ class BigQueryMCPServer:
             except Exception as error:
                 logger.error(f'Error in read_resource: {error}')
                 raise
-        
+
         @self.server.list_tools()
         async def handle_list_tools() -> List[types.Tool]:
-            """List available tools."""
             return [
                 types.Tool(
                     name="query",
@@ -357,10 +343,9 @@ class BigQueryMCPServer:
                     }
                 )
             ]
-        
+
         @self.server.call_tool()
         async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[types.TextContent]:
-            """Handle tool calls."""
             if name == "query":
                 sql = arguments.get('sql', '')
                 maximum_bytes_billed = arguments.get('maximumBytesBilled', '1000000000')
@@ -409,9 +394,8 @@ class BigQueryMCPServer:
         self.read_resource_handler = handle_read_resource
         self.list_tools_handler = handle_list_tools
         self.call_tool_handler = handle_call_tool
-    
+
     def qualify_table_path(self, sql: str, project_id: str) -> str:
-        """Qualify INFORMATION_SCHEMA table references with project ID."""
         # Match FROM INFORMATION_SCHEMA.TABLES or FROM dataset.INFORMATION_SCHEMA.TABLES
         unqualified_pattern = re.compile(
             r'FROM\s+(?:(\w+)\.)?INFORMATION_SCHEMA\.TABLES',
@@ -428,11 +412,8 @@ class BigQueryMCPServer:
         return unqualified_pattern.sub(replace_match, sql)
     
     async def run_stdio(self):
-        """Run the server with stdio transport."""
         try:
             # Use stdin/stdout for MCP communication
-            from mcp.server.stdio import stdio_server
-            
             async with stdio_server() as (read_stream, write_stream):
                 await self.server.run(
                     read_stream,
@@ -451,7 +432,6 @@ class BigQueryMCPServer:
             raise
     
     async def run_http(self):
-        """Run the server with HTTP transport."""
         try:
             # Import HTTP server here to avoid import issues if not needed
             from .http_server import MCPStreamingHTTPServer
@@ -475,7 +455,6 @@ class BigQueryMCPServer:
             raise
 
 async def main():
-    """Main entry point."""
     try:
         # Parse configuration
         config = parse_args()
