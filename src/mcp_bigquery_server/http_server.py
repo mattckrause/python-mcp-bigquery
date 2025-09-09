@@ -99,7 +99,10 @@ class MCPStreamingHTTPServer:
             import yaml
             from fastapi.openapi.utils import get_openapi
 
+            # Always use https in OpenAPI server URL
             base_url = str(request.base_url).rstrip("/")
+            if base_url.startswith("http://"):
+                base_url = "https://" + base_url[len("http://"):]
 
             def inject_auth(doc: dict) -> dict:
                 try:
@@ -218,10 +221,13 @@ class MCPStreamingHTTPServer:
         async def rest_list_resources(http_request: Request, auth: bool = Depends(authenticate_request)):
             try:
                 resource_list = await self.mcp_server.list_resources_handler()
-                return [
-                    {"uri": r.uri, "mimeType": r.mimeType, "name": r.name}
-                    for r in resource_list
-                ]
+                # Always return an object; never a top-level array
+                return {
+                    "resources": [
+                        {"uri": r.uri, "mimeType": r.mimeType, "name": r.name}
+                        for r in resource_list
+                    ]
+                }
             except Exception as e:
                 logger.error(f"REST /resources error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
@@ -238,7 +244,12 @@ class MCPStreamingHTTPServer:
             try:
                 content = await self.mcp_server.read_resource_handler(uri)
                 try:
-                    return json.loads(content)
+                    parsed = json.loads(content)
+                    # Wrap arrays to avoid top-level array responses
+                    if isinstance(parsed, list):
+                        return {"data": parsed}
+                    # If parsed is an object, return as-is
+                    return parsed
                 except Exception:
                     return {"text": content}
             except Exception as e:

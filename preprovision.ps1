@@ -109,15 +109,20 @@ try {
 
 # Apply .env overrides for common variables first (preferred over defaults)
 Write-Host "Applying .env overrides (if present)..." -ForegroundColor Yellow
-foreach ($k in @('GOOGLE_CLOUD_PROJECT_ID','ENABLE_AUTH','API_KEYS','JWT_SECRET')) {
+foreach ($k in @('GOOGLE_CLOUD_PROJECT_ID','ENABLE_AUTH','API_KEYS')) {
     if ($dotenv.ContainsKey($k)) {
         $v = $dotenv[$k]
         if ($k -eq 'ENABLE_AUTH') { $v = ($v.ToLower() -eq 'true') ? 'true' : 'false' }
-        try {
-            azd env set $k $v 2>&1 | Out-Null
-            Write-Host "✓ Set $k from .env" -ForegroundColor Green
-        } catch {
-            Write-Host "Warning: Could not set $k from .env: $_" -ForegroundColor Yellow
+        $existingVal = azd env get-value $k 2>$null
+        if ($existingVal) {
+            Write-Host "Skipping ${$k}: already set to '$existingVal'" -ForegroundColor Yellow
+        } else {
+            try {
+                azd env set $k $v 2>&1 | Out-Null
+                Write-Host "✓ Set $k from .env" -ForegroundColor Green
+            } catch {
+                Write-Host "Warning: Could not set $k from .env: $_" -ForegroundColor Yellow
+            }
         }
     }
 }
@@ -131,6 +136,8 @@ if (-not $existingProj -and $jsonObject.project_id) {
     } catch {
         Write-Host "Warning: Could not set GOOGLE_CLOUD_PROJECT_ID: $_" -ForegroundColor Yellow
     }
+} elseif ($existingProj) {
+    Write-Host "Skipping GOOGLE_CLOUD_PROJECT_ID: already set to '$existingProj'" -ForegroundColor Yellow
 }
 
 # Set other required variables if not set
@@ -138,23 +145,29 @@ Write-Host ""
 Write-Host "Checking other required environment variables..." -ForegroundColor Yellow
 
 # Check AZURE_ENV_NAME
-$envName = azd env get-value AZURE_ENV_NAME 2>$null
-if (-not $envName) {
-    Write-Host "Setting AZURE_ENV_NAME to default value..." -ForegroundColor Yellow
-    azd env set AZURE_ENV_NAME "python-bq-mcp" 2>&1 | Out-Null
-    Write-Host "✓ Set AZURE_ENV_NAME to: python-bq-mcp" -ForegroundColor Green
-} else {
-    Write-Host "✓ AZURE_ENV_NAME already set to: $envName" -ForegroundColor Green
-}
 
-# Check AZURE_LOCATION
-$location = azd env get-value AZURE_LOCATION 2>$null
-if (-not $location) {
-    Write-Host "Setting AZURE_LOCATION to default value..." -ForegroundColor Yellow
-    azd env set AZURE_LOCATION "centralus" 2>&1 | Out-Null
-    Write-Host "✓ Set AZURE_LOCATION to: centralus" -ForegroundColor Green
-} else {
-    Write-Host "✓ AZURE_LOCATION already set to: $location" -ForegroundColor Green
+# Always overwrite AZURE_ENV_NAME and AZURE_LOCATION in Azure env with .env values
+if ($dotenv.ContainsKey('AZURE_ENV_NAME')) {
+    $envName = $dotenv['AZURE_ENV_NAME']
+    $existingEnvName = azd env get-value AZURE_ENV_NAME 2>$null
+    if ($existingEnvName) {
+        Write-Host "Skipping AZURE_ENV_NAME: already set to '$existingEnvName'" -ForegroundColor Yellow
+    } else {
+        Write-Host "Overwriting AZURE_ENV_NAME in Azure env with .env value: $envName" -ForegroundColor Yellow
+        azd env set AZURE_ENV_NAME $envName 2>&1 | Out-Null
+        Write-Host "✓ Set AZURE_ENV_NAME from .env: $envName" -ForegroundColor Green
+    }
+}
+if ($dotenv.ContainsKey('AZURE_LOCATION')) {
+    $location = $dotenv['AZURE_LOCATION']
+    $existingLocation = azd env get-value AZURE_LOCATION 2>$null
+    if ($existingLocation) {
+        Write-Host "Skipping AZURE_LOCATION: already set to '$existingLocation'" -ForegroundColor Yellow
+    } else {
+        Write-Host "Overwriting AZURE_LOCATION in Azure env with .env value: $location" -ForegroundColor Yellow
+        azd env set AZURE_LOCATION $location 2>&1 | Out-Null
+        Write-Host "✓ Set AZURE_LOCATION from .env: $location" -ForegroundColor Green
+    }
 }
 
 # Set authentication variables to defaults if not set (after .env overrides)
@@ -163,32 +176,16 @@ if (-not $enableAuth) {
     azd env set ENABLE_AUTH "false" 2>&1 | Out-Null
     Write-Host "✓ Set ENABLE_AUTH to: false (default)" -ForegroundColor Green
 } else {
-    Write-Host "✓ ENABLE_AUTH set to: $enableAuth" -ForegroundColor Green
+    Write-Host "Skipping ENABLE_AUTH: already set to '$enableAuth'" -ForegroundColor Yellow
 }
 
-# Ensure API_KEYS and JWT_SECRET are at least empty strings
+# Ensure API_KEYS is at least an empty string
 $apiKeys = azd env get-value API_KEYS 2>$null
 if ($null -eq $apiKeys) {
     azd env set API_KEYS "" 2>&1 | Out-Null
     Write-Host "✓ Set API_KEYS to: (empty)" -ForegroundColor Green
-}
-
-$jwtSecret = azd env get-value JWT_SECRET 2>$null
-if ($null -eq $jwtSecret) {
-    azd env set JWT_SECRET "" 2>&1 | Out-Null
-    Write-Host "✓ Set JWT_SECRET to: (empty)" -ForegroundColor Green
-}
-
-# Set container registry endpoint if registry name exists
-$registryName = azd env get-value AZURE_REGISTRY_NAME 2>$null
-if ($registryName) {
-    $registryEndpoint = azd env get-value AZURE_CONTAINER_REGISTRY_ENDPOINT 2>$null
-    if (-not $registryEndpoint) {
-        azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT "$registryName.azurecr.io" 2>&1 | Out-Null
-        Write-Host "✓ Set AZURE_CONTAINER_REGISTRY_ENDPOINT to: $registryName.azurecr.io" -ForegroundColor Green
-    } else {
-        Write-Host "✓ AZURE_CONTAINER_REGISTRY_ENDPOINT already set to: $registryEndpoint" -ForegroundColor Green
-    }
+} else {
+    Write-Host "Skipping API_KEYS: already set to '$apiKeys'" -ForegroundColor Yellow
 }
 
 Write-Host ""

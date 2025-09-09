@@ -41,8 +41,13 @@ if [ -z "$rawCreds" ]; then
         # Extract project ID from the JSON
         projectId=$(echo "$rawCreds" | grep -o '"project_id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
         if [ -n "$projectId" ]; then
-            azd env set GOOGLE_CLOUD_PROJECT_ID "$projectId" 2>&1 >/dev/null
-            echo -e "\033[32mSet GOOGLE_CLOUD_PROJECT_ID to: $projectId\033[0m"
+            existingProj=$(azd env get-value GOOGLE_CLOUD_PROJECT_ID 2>/dev/null)
+            if [ -n "$existingProj" ]; then
+                echo -e "\033[33mSkipping GOOGLE_CLOUD_PROJECT_ID: already set to '$existingProj'\033[0m"
+            else
+                azd env set GOOGLE_CLOUD_PROJECT_ID "$projectId" 2>&1 >/dev/null
+                echo -e "\033[32mSet GOOGLE_CLOUD_PROJECT_ID to: $projectId\033[0m"
+            fi
         fi
     else
         echo -e "\033[31mERROR: No Google Cloud credentials found!\033[0m"
@@ -69,33 +74,53 @@ else
 fi
 
 # Ensure other required variables have defaults
-envName=$(azd env get-value AZURE_ENV_NAME 2>/dev/null)
-if [ -z "$envName" ]; then
-    azd env set AZURE_ENV_NAME "python-bq-mcp" 2>&1 >/dev/null
-    echo -e "\033[32mSet AZURE_ENV_NAME to default: python-bq-mcp\033[0m"
-fi
 
-location=$(azd env get-value AZURE_LOCATION 2>/dev/null)
-if [ -z "$location" ]; then
-    azd env set AZURE_LOCATION "centralus" 2>&1 >/dev/null
-    echo -e "\033[32mSet AZURE_LOCATION to default: centralus\033[0m"
+# Always set AZURE_ENV_NAME and AZURE_LOCATION from .env if present
+if [ -f .env ]; then
+    source .env
+    if [ -n "$AZURE_ENV_NAME" ]; then
+        existingEnvName=$(azd env get-value AZURE_ENV_NAME 2>/dev/null)
+        if [ -n "$existingEnvName" ]; then
+            echo -e "\033[33mSkipping AZURE_ENV_NAME: already set to '$existingEnvName'\033[0m"
+        else
+            azd env set AZURE_ENV_NAME "$AZURE_ENV_NAME" 2>&1 >/dev/null
+            echo -e "\033[32mSet AZURE_ENV_NAME from .env: $AZURE_ENV_NAME\033[0m"
+        fi
+    fi
+    if [ -n "$AZURE_LOCATION" ]; then
+        existingLocation=$(azd env get-value AZURE_LOCATION 2>/dev/null)
+        if [ -n "$existingLocation" ]; then
+            echo -e "\033[33mSkipping AZURE_LOCATION: already set to '$existingLocation'\033[0m"
+        else
+            azd env set AZURE_LOCATION "$AZURE_LOCATION" 2>&1 >/dev/null
+            echo -e "\033[32mSet AZURE_LOCATION from .env: $AZURE_LOCATION\033[0m"
+        fi
+    fi
 fi
 
 enableAuth=$(azd env get-value ENABLE_AUTH 2>/dev/null)
 if [ -z "$enableAuth" ]; then
     azd env set ENABLE_AUTH "false" 2>&1 >/dev/null
     echo -e "\033[32mSet ENABLE_AUTH to default: false\033[0m"
+else
+    echo -e "\033[33mSkipping ENABLE_AUTH: already set to '$enableAuth'\033[0m"
 fi
 
 # Ensure empty strings for optional auth parameters
 apiKeys=$(azd env get-value API_KEYS 2>/dev/null)
 if [ -z "$apiKeys" ]; then
     azd env set API_KEYS "" 2>&1 >/dev/null
+    echo -e "\033[32mSet API_KEYS to: (empty)\033[0m"
+else
+    echo -e "\033[33mSkipping API_KEYS: already set to '$apiKeys'\033[0m"
 fi
 
 jwtSecret=$(azd env get-value JWT_SECRET 2>/dev/null)
 if [ -z "$jwtSecret" ]; then
     azd env set JWT_SECRET "" 2>&1 >/dev/null
+    echo -e "\033[32mSet JWT_SECRET to: (empty)\033[0m"
+else
+    echo -e "\033[33mSkipping JWT_SECRET: already set to '$jwtSecret'\033[0m"
 fi
 
 echo -e "\033[32mPre-provision hook completed successfully!\033[0m"

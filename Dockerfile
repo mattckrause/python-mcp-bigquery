@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application source code
 COPY src/ src/
 COPY pyproject.toml .
-COPY openapi.yaml .
+#COPY openapi.yaml .
 
 # Install the package in development mode
 RUN pip install -e .

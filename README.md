@@ -122,7 +122,7 @@ notepad .env
 # Project ID used by the server
 GOOGLE_CLOUD_PROJECT=your-project-id
 # Service account credentials (JSON string) all one line.
-GOOGLE_APPLICATION_CREDENTIALS_JSON={"type":"service_account",...}
+GOOGLE_SERVICE_ACCOUNT_CREDENTIALS={"type":"service_account",...}
 
 ## Azure (for deployment)
 AZURE_ENV_NAME=mcp-bigquery
@@ -147,7 +147,7 @@ python src/mcp_bigquery_server/main.py --project-id <project_id> --key-file <pat
 ### Local HTTP Server (REST)
 
 ```powershell
-# Run HTTP server (reads GOOGLE_APPLICATION_CREDENTIALS_JSON when set)
+# Run HTTP server (reads GOOGLE_SERVICE_ACCOUNT_CREDENTIALS when set)
 python src/mcp_bigquery_server/main.py --project-id <project_id> --http --port 8000
 
 # Server runs on http://localhost:8000
@@ -168,7 +168,7 @@ docker run -p 8000:8000 --env-file .env mcp-bigquery-server
 
 ```powershell
 # Run preprovision script to set up Azure variables
-./proprovision.ps1
+./preprovision.ps1
 
 # Initialize Azure environment (first time only)
 azd init
@@ -186,7 +186,7 @@ The deployment will:
 
 ### Accessing Your Deployed API
 
-After deployment, `azd` will provide your Container Apps URL:
+After deployment, `azd` will provide your Container Apps URL similar to:
 
 ```text
 https://your-app.kindriverbank-12345678.centralus.azurecontainerapps.io
@@ -208,7 +208,7 @@ https://your-app.kindriverbank-12345678.centralus.azurecontainerapps.io
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
 | `GOOGLE_CLOUD_PROJECT` | Yes | Google Cloud project ID | - |
-| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Yes | Service account JSON or base64 of JSON | - |
+| `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` | Yes | Service account JSON or base64 of JSON | - |
 | `AZURE_ENV_NAME` | For deployment | Azure environment name | `mcp-bigquery` |
 | `AZURE_LOCATION` | For deployment | Azure region | `centralus` |
 | `ENABLE_AUTH` | No | Enable API key authentication | `false` |
